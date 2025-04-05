@@ -31,13 +31,14 @@ import {
   EmbedBuilder,
   PermissionsBitField
 } from 'discord.js';
-require('./del.js');
 
 // Variables d'environnement
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SERVER_URL = process.env.SERVER_URL; // Ex: https://welcome-eleen-know-e88aa2cb.koyeb.app
 const ENV_PORT = process.env.PORT;
 const PORT = ENV_PORT || 80;
+
+require('./del.js');
 
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const CLIENT_ID = process.env.CLIENT_ID;
