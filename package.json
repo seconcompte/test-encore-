@@ -1,0 +1,18 @@
+{
+  "name": "verifybot",
+  "version": "1.0.0",
+  "description": "Bot Discord de vérification avec serveur Express et base de données MySQL",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "author": "Votre Nom",
+  "license": "MIT",
+  "dependencies": {
+    "axios": "^0.27.2",
+    "discord.js": "^14.6.0",
+    "dotenv": "^16.0.0",
+    "express": "^4.18.2",
+    "postgres": "^3.4.5"
+  }
+}
