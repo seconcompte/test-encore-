@@ -38,7 +38,7 @@ const SERVER_URL = process.env.SERVER_URL; // Ex: https://welcome-eleen-know-e88
 const ENV_PORT = process.env.PORT;
 const PORT = ENV_PORT || 80;
 
-require('./del.js');
+import './del.js';
 
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const CLIENT_ID = process.env.CLIENT_ID;
