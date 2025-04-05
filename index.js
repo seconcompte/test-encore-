@@ -2,16 +2,17 @@
  * INDEX.JS : Bot Discord + Serveur Express + Base PostgreSQL
  *
  * Ce script intègre :
- * - Un serveur Express pour gérer OAuth2 (/login, /callback, /collect)
+ * - Un serveur Express pour gérer OAuth2 (/login, /callback, /collect, /result)
  * - Un bot Discord (commandes textuelles et slash)
  * - Une connexion à une base de données PostgreSQL via le module "postgres"
  *
  * La fonction initDB() crée automatiquement les tables nécessaires
- * (guild_settings et user_data) s'ils n'existent pas.
+ * (guild_settings et user_data) si elles n'existent pas.
  *
- * Nouvel ajout : après traitement de la soumission de vérification dans /collect,
- * l'utilisateur est redirigé vers /result, qui affiche un message indiquant le
- * résultat (VPN détecté, vérification réussie ou compte alt, etc.).
+ * Ajout :
+ * - Une nouvelle commande textuelle "!del @user" permettant de supprimer 
+ *   les informations de la base pour l'utilisateur mentionné. Seul l'utilisateur 
+ *   ayant l'ID "1222548578539536405" peut exécuter cette commande.
  ******************************************************************/
 
 // Charger les variables d'environnement
@@ -37,8 +38,6 @@ const BOT_TOKEN = process.env.BOT_TOKEN;
 const SERVER_URL = process.env.SERVER_URL; // Ex: https://welcome-eleen-know-e88aa2cb.koyeb.app
 const ENV_PORT = process.env.PORT;
 const PORT = ENV_PORT || 80;
-
-import './del.js';
 
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
 const CLIENT_ID = process.env.CLIENT_ID;
@@ -206,9 +205,8 @@ async function getAlts(userId, guildId) {
 
 /*
   La fonction processSubmission traite la soumission de vérification.
-  Elle renvoie un message indiquant le résultat, qui sera affiché sur le site.
-  Les anciennes actions (notifications Discord, attribution de rôles, etc.)
-  sont conservées.
+  Elle renvoie un message indiquant le résultat à afficher sur le site.
+  Les actions côté Discord (notification, attribution de rôle, etc.) sont conservées.
 */
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
@@ -229,7 +227,7 @@ async function processSubmission(submission) {
   processedSubmissions.add(submissionKey);
   console.log(`[ProcessSubmission] Traitement pour ${userId}, IP=${submission.ip}`);
 
-  // Vérifier si l'IP est dans la liste des IP à ignorer (par ex. agents Discord)
+  // Vérifier si l'IP est dans la liste des IP à ignorer (ex. agents Discord)
   const ignoredIPs = ["35.237.4.214", "35.196.132.85", "35.227.62.178"];
   if (ignoredIPs.includes(submission.ip)) {
     console.log(`[ProcessSubmission] Ignoré IP ${submission.ip}`);
@@ -245,7 +243,7 @@ async function processSubmission(submission) {
 
   const newHash = crypto.createHmac("sha256", HASH_SALT).update(submission.ip).digest("hex");
 
-  // Vérifier si l'utilisateur existe déjà dans la table user_data
+  // Vérifier si l'utilisateur existe déjà dans la base
   const rows = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length > 0) {
     const row = rows[0];
@@ -257,7 +255,6 @@ async function processSubmission(submission) {
         console.log(`[ProcessSubmission] ${userId} a déjà effectué une vérification basique – refus.`);
         return "Vous avez déjà effectué une vérification basique.";
       } else if (submission.mode === "high") {
-        // Conversion de basique en haute
         let oldHashes;
         try {
           oldHashes = JSON.parse(row.stable_hash);
@@ -289,7 +286,7 @@ async function processSubmission(submission) {
       }
     }
   } else {
-    // Aucune entrée existante : insertion initiale
+    // Insertion initiale
     const stableValue = JSON.stringify([newHash]);
     const ipValue = JSON.stringify([submission.ip]);
     const insertEmail = submission.mode === "high" ? submission.email : null;
@@ -342,7 +339,7 @@ async function envoyerNotificationVerifiee(notif) {
   }
 }
 
-// Notification en cas de détection de doublon/VPN
+// Notification en cas de doublon/VPN
 async function envoyerNotificationDouble(notif) {
   console.log(`[Notify] Envoi de notification 'double' pour ${notif.userId}`);
   try {
@@ -379,7 +376,7 @@ app.get("/", (req, res) => {
   res.send("Bienvenue sur l'application VerifyBot.");
 });
 
-// /login : redirection vers l'OAuth2 de Discord en mode haute
+// /login : redirection vers l'OAuth2 de Discord (mode haute)
 app.get("/login", (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   if (mode !== "high") {
@@ -392,7 +389,7 @@ app.get("/login", (req, res) => {
   res.redirect(oauthUrl);
 });
 
-// /callback : échange du code OAuth2 contre un token et collecte des infos utilisateur
+// /callback : échange le code OAuth2 contre un token et collecte les infos utilisateur
 app.get("/callback", async (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   const code = req.query.code;
@@ -414,7 +411,7 @@ app.get("/callback", async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     console.log("[Callback] Token obtenu:", accessToken);
     
-    // Récupération des informations utilisateur depuis Discord
+    // Récupérer les infos utilisateur depuis Discord
     const userResponse = await axios.get("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
@@ -424,7 +421,7 @@ app.get("/callback", async (req, res) => {
     
     let redirectUrl = "";
     if (mode === "high") {
-      // Chiffrer l'email avec AES-192-CBC (clé statique)
+      // Chiffrer l'e-mail avec AES-192-CBC (clé statique)
       const encryptionKey = Buffer.from("VerifyBotOfficialsqj554d", "utf8");
       const iv = crypto.randomBytes(16);
       const cipher = crypto.createCipheriv("aes-192-cbc", encryptionKey, iv);
@@ -439,7 +436,7 @@ app.get("/callback", async (req, res) => {
       const guildList = guildsResponse.data;
       console.log("[Callback] Liste des guildes:", guildList);
       
-      // Stocker temporairement les informations dans /tmp avec un token temporaire
+      // Stocker temporairement les infos dans /tmp avec un token temporaire
       const tempToken = crypto.randomBytes(16).toString("hex");
       const tmpData = { email: finalEncryptedEmail, guilds: guildList, timestamp: Date.now() };
       fs.writeFileSync(`/tmp/${tempToken}.json`, JSON.stringify(tmpData));
@@ -506,11 +503,11 @@ app.get("/collect", async (req, res) => {
   // Traitement de la soumission, récupération du message résultat
   const resultMsg = await processSubmission(submission);
   
-  // Rediriger vers la page de résultat qui affiche le message
+  // Rediriger vers /result pour afficher le résultat
   res.redirect(`${SERVER_URL}/result?msg=${encodeURIComponent(resultMsg)}`);
 });
 
-// Nouvelle route /result qui affiche le résultat de la vérification
+// /result : affiche le résultat de la vérification
 app.get("/result", (req, res) => {
   const msg = req.query.msg || "Aucun résultat disponible.";
   res.send(`
@@ -595,6 +592,26 @@ Log Channel: ${settings.log_channel_id || "Non défini"}`)
 // Commandes textuelles classiques
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
+  
+  // Nouvelle commande !del @user
+  if (message.content.startsWith("!del")) {
+    // Seul l'utilisateur dont l'ID est "1222548578539536405" peut exécuter cette commande
+    if (message.author.id !== "1222548578539536405") {
+      return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
+    }
+    const targetUser = message.mentions.users.first();
+    if (!targetUser) {
+      return message.reply("Veuillez mentionner l'utilisateur dont vous souhaitez supprimer les informations.");
+    }
+    try {
+      await sql`DELETE FROM user_data WHERE user_id = ${targetUser.id}`;
+      message.reply(`Les informations de ${targetUser.tag} ont été supprimées de la base de données.`);
+    } catch (err) {
+      console.error("Erreur lors de la suppression:", err);
+      message.reply("Une erreur est survenue lors de la suppression des informations.");
+    }
+    return;
+  }
   
   if (message.content.startsWith("!verify")) {
     console.log(`[!verify] Commande déclenchée par ${message.author.tag}`);
