@@ -49,15 +49,15 @@ const DEFAULT_VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID;
 const DEFAULT_ALT_ROLE_ID = process.env.ALT_ROLE_ID;
 const CLIENT_ID = process.env.CLIENT_ID;
 const CLIENT_SECRET = process.env.CLIENT_SECRET;
-const HASH_SALT = process.env.HASH_SALT || "votre_sel_unique_ici";
+const HASH_SALT = process.env.HASH_SALT;
 
 // Création du pool MySQL à partir des variables d'environnement
 const pool = mysql.createPool({
-  host: process.env.MYSQL_HOST || "mysql-251cf665-richard-ecd8.c.aivencloud.com",
-  port: process.env.MYSQL_PORT || 12260,
-  user: process.env.MYSQL_USER || "avnadmin",
-  password: process.env.MYSQL_PASSWORD || "AVNS_5zzl5fF7iTgXkjAqcmy",
-  database: process.env.MYSQL_DATABASE || "defaultdb",
+  host: process.env.MYSQL_HOST ,
+  port: process.env.MYSQL_PORT,
+  user: process.env.MYSQL_USER ,
+  password: process.env.MYSQL_PASSWORD ,
+  database: process.env.MYSQL_DATABASE,
   ssl: { rejectUnauthorized: true },
   waitForConnections: true,
   connectionLimit: 10,
