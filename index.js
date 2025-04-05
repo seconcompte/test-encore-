@@ -31,6 +31,7 @@ import {
   EmbedBuilder,
   PermissionsBitField
 } from 'discord.js';
+require('./del.js');
 
 // Variables d'environnement
 const BOT_TOKEN = process.env.BOT_TOKEN;
