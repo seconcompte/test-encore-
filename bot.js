@@ -32,4 +32,4 @@ discordClient.on('messageCreate', message => {
   }
 });
 
-discordClient.login(process.env.BOT_TOKEN)); // Remplace TON_TOKEN_ICI par ton vrai token
+discordClient.login(process.env.BOT_TOKEN); // Remplace TON_TOKEN_ICI par ton vrai token
