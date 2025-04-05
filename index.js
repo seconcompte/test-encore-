@@ -8,6 +8,10 @@
  *
  * La fonction initDB() crée automatiquement les tables nécessaires
  * (guild_settings et user_data) s'ils n'existent pas.
+ *
+ * Nouvel ajout : après traitement de la soumission de vérification dans /collect,
+ * l'utilisateur est redirigé vers /result, qui affiche un message indiquant le
+ * résultat (VPN détecté, vérification réussie ou compte alt, etc.).
  ******************************************************************/
 
 // Charger les variables d'environnement
@@ -42,12 +46,12 @@ const ALT_ROLE_ID = process.env.ALT_ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const HASH_SALT = process.env.HASH_SALT;
 
-// Valeurs par défaut (utilisées notamment pour la création des settings)
+// Valeurs par défaut pour la configuration d'une guild
 const DEFAULT_NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID;
 const DEFAULT_VERIFIED_ROLE_ID = VERIFIED_ROLE_ID;
 const DEFAULT_ALT_ROLE_ID = ALT_ROLE_ID;
 
-// Création de la connexion PostgreSQL
+// Connexion PostgreSQL via le module 'postgres'
 const sql = postgres({
   host: process.env.DATABASE_HOST,
   database: process.env.DATABASE_NAME,
@@ -56,9 +60,9 @@ const sql = postgres({
   ssl: 'require'
 });
 
-// Initialise le schéma de la base de données (tables, etc.)
+// Initialisation du schéma de la base de données
 async function initDB() {
-  // Création de la table guild_settings si elle n'existe pas
+  // Table pour les paramètres de la guild
   await sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
       guild_id TEXT PRIMARY KEY,
@@ -69,7 +73,7 @@ async function initDB() {
     );
   `;
   
-  // Création de la table user_data si elle n'existe pas
+  // Table pour stocker les données utilisateur
   await sql`
     CREATE TABLE IF NOT EXISTS user_data (
       user_id TEXT,
@@ -101,7 +105,7 @@ app.use(express.json());
 
 /********************* Fonctions Utilitaires **********************/
 
-// Détection VPN via API
+// Détection VPN via une API externe
 async function detectVPNviaAPI(ip) {
   const apiKey = "9a038c170f4d4066a865bd351eddc920";
   try {
@@ -140,7 +144,7 @@ async function detectVPN(ip) {
   return (await detectVPNviaAPI(ip)) || (await detectVPNviaDNS(ip));
 }
 
-// Récupération ou création des settings d'une guild
+// Récupération ou création des paramètres d'une guild
 async function getGuildSettings(guildId) {
   const rows = await sql`SELECT * FROM guild_settings WHERE guild_id = ${guildId}`;
   if (rows.length > 0) {
@@ -166,7 +170,7 @@ async function getGuildSettings(guildId) {
   }
 }
 
-// Recherche de comptes alternatifs (alts)
+// Recherche des comptes alternatifs (alts)
 async function getAlts(userId, guildId) {
   const rows = await sql`SELECT stable_hash FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length === 0) return [];
@@ -196,9 +200,14 @@ async function getAlts(userId, guildId) {
   return alts;
 }
 
-// Traitement des soumissions
-const processedSubmissions = new Set();
+/********************* Traitement des Soumissions **********************/
 
+/*
+  La fonction processSubmission traite la soumission de vérification.
+  Elle renvoie un message indiquant le résultat, qui sera affiché sur le site.
+  Les anciennes actions (notifications Discord, attribution de rôles, etc.)
+  sont conservées.
+*/
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
   let userId, guildId;
@@ -207,43 +216,46 @@ async function processSubmission(submission) {
     guildId = submission.guildId ? Buffer.from(submission.guildId, "base64").toString("utf8") : "";
   } catch (err) {
     console.error("[ProcessSubmission] Erreur de décodage:", err.message);
-    return;
+    return "Erreur lors du décodage des informations.";
   }
+  
   const submissionKey = `${userId}-${submission.ip}-${submission.mode}`;
   if (processedSubmissions.has(submissionKey)) {
     console.log(`[ProcessSubmission] Déjà traité pour ${userId}, IP=${submission.ip}`);
-    return;
+    return "Cette soumission a déjà été traitée.";
   }
   processedSubmissions.add(submissionKey);
   console.log(`[ProcessSubmission] Traitement pour ${userId}, IP=${submission.ip}`);
 
-  // Ignorer certaines IP (par exemple, celles d'agents Discord)
+  // Vérifier si l'IP est dans la liste des IP à ignorer (par ex. agents Discord)
   const ignoredIPs = ["35.237.4.214", "35.196.132.85", "35.227.62.178"];
   if (ignoredIPs.includes(submission.ip)) {
     console.log(`[ProcessSubmission] Ignoré IP ${submission.ip}`);
-    return;
+    return "Cette IP est ignorée pour des raisons internes.";
   }
 
+  // Vérification VPN
   if (await detectVPN(submission.ip)) {
     console.log(`[ProcessSubmission] VPN détecté pour ${userId}. Vérification bloquée.`);
     await envoyerNotificationDouble({ type: "vpn", userId, guildId, ip: submission.ip, mode: submission.mode });
-    return;
+    return "VPN détecté. Votre vérification a été annulée.";
   }
 
   const newHash = crypto.createHmac("sha256", HASH_SALT).update(submission.ip).digest("hex");
 
-  // Vérifier si l'utilisateur existe déjà
+  // Vérifier si l'utilisateur existe déjà dans la table user_data
   const rows = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length > 0) {
     const row = rows[0];
     if (row.email !== null) {
       console.log(`[ProcessSubmission] ${userId} déjà vérifié en mode haute.`);
-      return;
+      return "Vous êtes déjà vérifié.";
     } else {
       if (submission.mode === "basic") {
-        console.log(`[ProcessSubmission] ${userId} a déjà une vérification basique – refus.`);
-        return;
+        console.log(`[ProcessSubmission] ${userId} a déjà effectué une vérification basique – refus.`);
+        return "Vous avez déjà effectué une vérification basique.";
       } else if (submission.mode === "high") {
+        // Conversion de basique en haute
         let oldHashes;
         try {
           oldHashes = JSON.parse(row.stable_hash);
@@ -271,11 +283,11 @@ async function processSubmission(submission) {
         `;
         console.log(`[ProcessSubmission] Conversion basique -> haute pour ${userId}.`);
         await envoyerNotificationVerifiee({ userId, guildId, ip: submission.ip, mode: submission.mode, guilds: submission.guilds });
-        return;
+        return "Conversion de vérification basique vers haute effectuée avec succès.";
       }
     }
   } else {
-    // Insertion initiale
+    // Aucune entrée existante : insertion initiale
     const stableValue = JSON.stringify([newHash]);
     const ipValue = JSON.stringify([submission.ip]);
     const insertEmail = submission.mode === "high" ? submission.email : null;
@@ -285,10 +297,13 @@ async function processSubmission(submission) {
     `;
     console.log(`[ProcessSubmission] Insertion effectuée pour ${userId}.`);
     await envoyerNotificationVerifiee({ userId, guildId, ip: submission.ip, mode: submission.mode, guilds: submission.guilds });
+    return "Votre vérification a été effectuée avec succès.";
   }
 }
 
-// Notification en cas de vérification réussie (sans afficher l'IP)
+/********************* Notifications Discord **********************/
+
+// Notification pour vérification réussie
 async function envoyerNotificationVerifiee(notif) {
   console.log(`[Notify] Envoi de notification 'vérifié' pour ${notif.userId}`);
   try {
@@ -301,10 +316,10 @@ async function envoyerNotificationVerifiee(notif) {
     const alts = await getAlts(notif.userId, notif.guildId);
     let altInfo = "";
     if (alts.length > 0) {
-      altInfo = `\nCe compte est un alt de ${alts.map(id => `<@${id}>`).join(", ")}`;
+      altInfo = `\nCe compte est détecté comme alt de ${alts.map(id => `<@${id}>`).join(", ")}`;
     }
     const typeVerification = notif.mode === "high" ? "Haute" : "Basique";
-    const description = `<@${notif.userId}> a été vérifié par VerifyBot (${typeVerification} vérification).${altInfo}`;
+    const description = `<@${notif.userId}> a été vérifié par VerifyBot (${typeVerification}).${altInfo}`;
     const embed = new EmbedBuilder()
       .setTitle("Vérification réussie")
       .setDescription(description)
@@ -313,7 +328,7 @@ async function envoyerNotificationVerifiee(notif) {
     await notifChannel.send({ embeds: [embed] });
     console.log("[Notify] Notification 'vérifié' envoyée.");
 
-    // Attribution du rôle vérifié
+    // Attribution du rôle "vérifié"
     const guild = notifChannel.guild;
     const member = await guild.members.fetch(notif.userId);
     if (member && !member.roles.cache.has(settings.VERIFIED_ROLE_ID)) {
@@ -325,6 +340,7 @@ async function envoyerNotificationVerifiee(notif) {
   }
 }
 
+// Notification en cas de détection de doublon/VPN
 async function envoyerNotificationDouble(notif) {
   console.log(`[Notify] Envoi de notification 'double' pour ${notif.userId}`);
   try {
@@ -342,6 +358,7 @@ async function envoyerNotificationDouble(notif) {
       .setTimestamp();
     await notifChannel.send({ embeds: [embed] });
     console.log("[Notify] Notification 'double' envoyée.");
+
     const guild = notifChannel.guild;
     const member = await guild.members.fetch(notif.userId);
     if (member && !member.roles.cache.has(settings.ALT_ROLE_ID)) {
@@ -360,7 +377,7 @@ app.get("/", (req, res) => {
   res.send("Bienvenue sur l'application VerifyBot.");
 });
 
-// /login : redirige vers l'OAuth2 de Discord (mode haute)
+// /login : redirection vers l'OAuth2 de Discord en mode haute
 app.get("/login", (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   if (mode !== "high") {
@@ -373,7 +390,7 @@ app.get("/login", (req, res) => {
   res.redirect(oauthUrl);
 });
 
-// /callback : échange le code OAuth2 contre un token, récupère les infos et redirige vers /collect
+// /callback : échange du code OAuth2 contre un token et collecte des infos utilisateur
 app.get("/callback", async (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   const code = req.query.code;
@@ -395,7 +412,7 @@ app.get("/callback", async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     console.log("[Callback] Token obtenu:", accessToken);
     
-    // Récupérer les informations utilisateur
+    // Récupération des informations utilisateur depuis Discord
     const userResponse = await axios.get("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
@@ -420,7 +437,7 @@ app.get("/callback", async (req, res) => {
       const guildList = guildsResponse.data;
       console.log("[Callback] Liste des guildes:", guildList);
       
-      // Stocker temporairement les infos dans /tmp avec un token temporaire
+      // Stocker temporairement les informations dans /tmp avec un token temporaire
       const tempToken = crypto.randomBytes(16).toString("hex");
       const tmpData = { email: finalEncryptedEmail, guilds: guildList, timestamp: Date.now() };
       fs.writeFileSync(`/tmp/${tempToken}.json`, JSON.stringify(tmpData));
@@ -446,7 +463,7 @@ app.get("/callback", async (req, res) => {
   }
 });
 
-// /collect : traite la soumission finale, récupère les données temporaires (pour mode high)
+// /collect : collecte la vérification et redirige vers /result
 app.get("/collect", async (req, res) => {
   const encodedUserId = req.query.userId;
   const guildId = req.query.guildId || "";
@@ -484,8 +501,32 @@ app.get("/collect", async (req, res) => {
     mode: mode
   };
   
-  await processSubmission(submission);
-  res.send("Votre vérification a été reçue. Vous recevrez bientôt une notification sur Discord.");
+  // Traitement de la soumission, récupération du message résultat
+  const resultMsg = await processSubmission(submission);
+  
+  // Rediriger vers la page de résultat qui affiche le message
+  res.redirect(`${SERVER_URL}/result?msg=${encodeURIComponent(resultMsg)}`);
+});
+
+// Nouvelle route /result qui affiche le résultat de la vérification
+app.get("/result", (req, res) => {
+  const msg = req.query.msg || "Aucun résultat disponible.";
+  res.send(`
+    <html>
+      <head>
+        <title>Résultat de Vérification</title>
+        <style>
+          body { font-family: Arial, sans-serif; text-align: center; margin-top: 50px; }
+          h1 { color: #333; }
+          p { font-size: 1.2em; }
+        </style>
+      </head>
+      <body>
+        <h1>Résultat de Vérification</h1>
+        <p>${msg}</p>
+      </body>
+    </html>
+  `);
 });
 
 /********************* Commandes Discord **********************/
@@ -629,7 +670,7 @@ client.on("interactionCreate", async (interaction) => {
 
 /********************* Démarrage de l'Application **********************/
 
-// Démarrer le serveur Express et initialiser la base de données
+// Démarrer Express et initialiser la base de données
 app.listen(PORT, async () => {
   console.log(`Serveur Express démarré sur le port ${PORT}`);
   await initDB();
