@@ -627,4 +627,4 @@ app.listen(port, () => {
 client.login(BOT_TOKEN)
   .then(() => console.log("[Login] Client Discord connecté avec succès."))
   .catch(err => console.error("[Login] Erreur lors du login:", err.message));
-consoles.log(process.env.SERVER_URL)
+console.log(process.env.SERVER_URL)
