@@ -43,7 +43,7 @@ const {
 // Variables d'environnement
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const SERVER_URL = process.env.SERVER_URL || "https://welcome-eleen-know-e88aa2cb.koyeb.app";
-const ENV_PORT = process.env.PORT; // Laisser vide => port 80
+const ENV_PORT = process.env.PORT || 8000 ; // Laisser vide => port 80
 const DEFAULT_NOTIFICATION_CHANNEL_ID = process.env.NOTIFICATION_CHANNEL_ID;
 const DEFAULT_VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID;
 const DEFAULT_ALT_ROLE_ID = process.env.ALT_ROLE_ID;
