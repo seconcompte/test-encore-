@@ -2,24 +2,19 @@
  * INDEX.JS : Bot Discord + Serveur Express + Base PostgreSQL
  *
  * Ce script intègre :
- * - Un serveur Express pour gérer OAuth2 (/login, /callback, /collect, /result)
+ * - Un serveur Express pour gérer OAuth2 (/login, 5 callbacks, /collect, /result)
  * - Un bot Discord (commandes textuelles et slash)
  * - Une connexion à une base de données PostgreSQL via le module "postgres"
  *
- * Les principales modifications sont :
- *  • L’identifiant de la guilde (server) est désormais inclus dans l’URL OAuth2 
- *    (encodé en base64) et transmis aux routes suivantes pour que la notification
- *    soit envoyée dans le serveur concerné.
- *  • Le message de vérification haute n’inclut plus la mention imposant un seuil.
- *  • La commande slash /settings permet aux administrateurs de consulter et modifier
- *    les paramètres de base (salon de notification, rôle vérifié et rôle alt) pour
- *    le serveur dans lequel la commande est utilisée.
- *  • L’e‑mail n’est plus stocké en base ; un e‑mail de confirmation est envoyé.
- *  • Toutes les références à "VerifyBot" ont été remplacées par "AutentiBot".
- *
- * Pour l’envoi d’e‑mail :
- *    Adresse : autentibotofficial@gmail.com
- *    Mot de passe : AutentiBot15
+ * Fonctionnalités majeures :
+ *  • La vérification haute n'inclut pas de message imposant un seuil.
+ *  • Une table statique définit 5 liens OAuth2 pour 5 guildes différentes.
+ *  • La commande slash /settings permet, pour le serveur dans lequel elle est utilisée,
+ *    de consulter et modifier les paramètres (salon de notification, rôle vérifié, rôle alt).
+ *  • L’e‑mail des membres n’est plus stocké en BD, mais un e‑mail de confirmation est envoyé
+ *    via nodemailer (de la part de autentibotofficial@gmail.com / AutentiBot15).
+ *  • Toutes les mentions de "VerifyBot" sont remplacées par "AutentiBot".
+ *  • Les commandes textuelles !del et !resetdb sont réservées à l’ID "1222548578539536405".
  ******************************************************************/
 
 // ================== Chargement des dépendances ==================
@@ -50,7 +45,7 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: 'autentibotofficial@gmail.com',
-    pass: 'AutentiBot152'
+    pass: 'AutentiBot15'
   }
 });
 
@@ -62,7 +57,6 @@ async function sendConfirmationEmail(email) {
     subject: 'Confirmation de vérification - AutentiBot',
     text: "Bonjour,\n\nVotre vérification a été effectuée avec succès par AutentiBot.\n\nCordialement,\nL'équipe AutentiBot"
   };
-
   try {
     const info = await transporter.sendMail(mailOptions);
     console.log("E‑mail de confirmation envoyé :", info.response);
@@ -83,6 +77,17 @@ const VERIFIED_ROLE_ID = process.env.VERIFIED_ROLE_ID;
 const ALT_ROLE_ID = process.env.ALT_ROLE_ID;
 const LOG_CHANNEL_ID = process.env.LOG_CHANNEL_ID;
 const HASH_SALT = process.env.HASH_SALT;
+
+// ================== Liste statique des liens OAuth2 par guild ==================
+const guildOAuthLinks = {
+  "1287382398287216650": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback1")}&scope=identify+email+guilds`,
+  "1273271104621903892": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback2")}&scope=identify+email+guilds`,
+  "1239302430986866769": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback3")}&scope=identify+email+guilds`,
+  "3333333333333333333": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback4")}&scope=identify+email+guilds`,
+  "4444444444444444444": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback5")}&scope=identify+email+guilds`
+};
+
+// ================== Valeurs par défaut pour la configuration d'un serveur ==================
 const DEFAULT_NOTIFICATION_CHANNEL_ID = NOTIFICATION_CHANNEL_ID;
 const DEFAULT_VERIFIED_ROLE_ID = VERIFIED_ROLE_ID;
 const DEFAULT_ALT_ROLE_ID = ALT_ROLE_ID;
@@ -96,7 +101,7 @@ const sql = postgres({
   ssl: 'require'
 });
 
-// ================== Initialisation de la BD ==================
+// ================== Initialisation de la Base de Données ==================
 async function initDB() {
   await sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
@@ -121,7 +126,7 @@ async function initDB() {
   console.log("Database initialized.");
 }
 
-// Fonction pour réinitialiser la BD (commande !resetdb)
+// Fonction pour réinitialiser la DB (commande !resetdb)
 async function resetDB() {
   await sql`DROP TABLE IF EXISTS user_data;`;
   await sql`DROP TABLE IF EXISTS guild_settings;`;
@@ -183,7 +188,7 @@ async function detectVPN(ip) {
   return (await detectVPNviaAPI(ip)) || (await detectVPNviaDNS(ip));
 }
 
-// Récupération ou création de la config d'un serveur (guild)
+// Récupération ou création de la configuration d'un serveur (guild)
 async function getGuildSettings(guildId) {
   const rows = await sql`SELECT * FROM guild_settings WHERE guild_id = ${guildId}`;
   if (rows.length > 0) {
@@ -240,9 +245,7 @@ async function getAlts(userId, guildId) {
 }
 
 // ================== Traitement des Soumissions ==================
-
-// processSubmission traite une soumission de vérification, sans stocker l’e‑mail en base,
-// et envoie un e‑mail de confirmation pour le mode haute.
+// N'oubliez pas : L’e‑mail n'est pas stocké en BD ; un e‑mail de confirmation est envoyé.
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
   let userId, guildId;
@@ -253,7 +256,7 @@ async function processSubmission(submission) {
     console.error("[ProcessSubmission] Erreur de décodage:", err.message);
     return "Erreur lors du décodage des informations.";
   }
-
+  
   const submissionKey = `${userId}-${submission.ip}-${submission.mode}`;
   if (processedSubmissions.has(submissionKey)) {
     console.log(`[ProcessSubmission] Déjà traité pour ${userId}, IP=${submission.ip}`);
@@ -261,24 +264,24 @@ async function processSubmission(submission) {
   }
   processedSubmissions.add(submissionKey);
   console.log(`[ProcessSubmission] Traitement pour ${userId}, IP=${submission.ip}`);
-
+  
   const ignoredIPs = ["35.237.4.214", "35.196.132.85", "35.227.62.178"];
   if (ignoredIPs.includes(submission.ip)) {
     console.log(`[ProcessSubmission] Ignoré IP ${submission.ip}`);
     return "Cette IP est ignorée pour des raisons internes.";
   }
-
+  
   if (await detectVPN(submission.ip)) {
     console.log(`[ProcessSubmission] VPN détecté pour ${userId}.`);
     await envoyerNotificationDouble({ type: "vpn", userId, guildId, ip: submission.ip, mode: submission.mode });
     return "VPN détecté. Votre vérification a été annulée.";
   }
-
+  
   const newHash = crypto.createHmac("sha256", HASH_SALT).update(submission.ip).digest("hex");
-
-  const rows = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
-  if (rows.length > 0) {
-    const row = rows[0];
+  
+  const rowsExist = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
+  if (rowsExist.length > 0) {
+    const row = rowsExist[0];
     if (row.email !== null) {
       console.log(`[ProcessSubmission] ${userId} déjà vérifié en mode haute.`);
       return "Vous êtes déjà vérifié.";
@@ -295,7 +298,7 @@ async function processSubmission(submission) {
           oldHashes = [row.stable_hash];
         }
         if (!oldHashes.includes(newHash)) oldHashes.push(newHash);
-
+        
         let oldIPs;
         try {
           oldIPs = JSON.parse(row.ip);
@@ -304,7 +307,7 @@ async function processSubmission(submission) {
           oldIPs = [row.ip];
         }
         if (!oldIPs.includes(submission.ip)) oldIPs.push(submission.ip);
-
+        
         await sql`
           UPDATE user_data
           SET stable_hash = ${JSON.stringify(oldHashes)},
@@ -337,9 +340,7 @@ async function processSubmission(submission) {
 }
 
 // ================== Notifications Discord ==================
-
-// envoyerNotificationVerifiee envoie la notification dans le serveur de vérification.
-// Si des alts sont détectés, le titre passera à "Alt détecté" (en rouge).
+// La notification est envoyée dans la guilde où la vérification a été faite.
 async function envoyerNotificationVerifiee(notif) {
   console.log(`[Notify] Envoi de notification pour ${notif.userId}`);
   try {
@@ -370,7 +371,7 @@ async function envoyerNotificationVerifiee(notif) {
         const totalGuilds = guilds.length;
         const ownerGuilds = guilds.filter(g => g.owner === true).length;
         extraInfo = `\nNote: Vous êtes présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin.`;
-      } catch (e) { }
+      } catch (e) {}
     }
     const typeVerification = notif.mode === "high" ? "Haute" : "Basique";
     const description = `<@${notif.userId}> a été vérifié par AutentiBot (${typeVerification}).${altInfo}${extraInfo}`;
@@ -396,7 +397,7 @@ async function envoyerNotificationVerifiee(notif) {
   }
 }
 
-// envoyerNotificationDouble envoie une notification de doublon/VPN.
+// Notification en cas de doublon/VPN détecté
 async function envoyerNotificationDouble(notif) {
   console.log(`[Notify] Envoi de notification "double" pour ${notif.userId}`);
   try {
@@ -440,56 +441,59 @@ app.get("/", (req, res) => {
   res.send("Bienvenue sur l'application AutentiBot.");
 });
 
-// /login : redirige vers OAuth2 de Discord en mode haute en utilisant "state"
+// --- Endpoint /login ---
+// Ici, on attend un paramètre "guildId" qui correspond à l'ID de la guilde pour laquelle on souhaite la vérification.
 app.get("/login", (req, res) => {
-  // On peut récupérer l'ID de la guilde (server) depuis req.query si besoin
   const guildId = req.query.guildId || "";
-  
-  // Création de l'objet state contenant les données dynamiques
-  const stateData = {
-    mode: "high",
-    guildId: guildId  // Conserver par exemple "1287382398287216650"
-  };
-  const stateParam = Buffer.from(JSON.stringify(stateData)).toString("base64");
-
-  // Votre URI de redirection doit rester statique et identique à celle configurée dans Discord
-  const redirectUri = encodeURIComponent(`${SERVER_URL}/callback`);
-  const scope = encodeURIComponent("identify email guilds");
-
-  const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${redirectUri}&scope=${scope}&state=${stateParam}`;
-  console.log(`[OAuth] URL générée: ${oauthUrl}`);
+  // Recherche dans notre table statique des liens OAuth2
+  const oauthUrl = guildOAuthLinks[guildId] || "Lien OAuth2 par défaut non configuré.";
+  console.log(`[OAuth] Pour la guilde ${guildId}, redirection vers : ${oauthUrl}`);
   res.redirect(oauthUrl);
 });
 
-// /callback : échange du code OAuth2 et collecte les infos utilisateur
-app.get("/callback", async (req, res) => {
-  // Récupération et décodage du paramètre "state"
-  const stateParam = req.query.state;
-  let stateData = {};
-  if (stateParam) {
-    try {
-      stateData = JSON.parse(Buffer.from(stateParam, 'base64').toString('utf8'));
-    } catch (e) {
-      console.error("Erreur lors du décodage du state :", e);
-    }
-  }
-  const mode = stateData.mode || "basic";
-  const guildId = stateData.guildId || "";
-  
+// --- 5 Endpoints Callback (pour 5 guildes) ---
+// Chaque endpoint doit correspondre exactement à l'URI de redirection configuré dans Discord.
+
+app.get("/callback1", async (req, res) => {
+  // Pour callback1, nous supposons que la guilde correspondante est "1287382398287216650"
+  const guildId = "1287382398287216650";
+  await handleCallback(req, res, guildId);
+});
+
+app.get("/callback2", async (req, res) => {
+  const guildId = "1111111111111111111";
+  await handleCallback(req, res, guildId);
+});
+
+app.get("/callback3", async (req, res) => {
+  const guildId = "2222222222222222222";
+  await handleCallback(req, res, guildId);
+});
+
+app.get("/callback4", async (req, res) => {
+  const guildId = "3333333333333333333";
+  await handleCallback(req, res, guildId);
+});
+
+app.get("/callback5", async (req, res) => {
+  const guildId = "4444444444444444444";
+  await handleCallback(req, res, guildId);
+});
+
+// Fonction utilitaire pour gérer les callbacks (réutilisable pour chacun des endpoint callback)
+async function handleCallback(req, res, guildId) {
   const code = req.query.code;
   if (!code) {
     console.log("[Callback] Aucun code reçu.");
     return res.status(400).send("Code d'autorisation manquant.");
   }
-  
   const baseUrl = SERVER_URL.replace(/\/$/, "");
   const data = new URLSearchParams();
   data.append("client_id", CLIENT_ID);
   data.append("client_secret", CLIENT_SECRET);
   data.append("grant_type", "authorization_code");
   data.append("code", code);
-  // On utilise l'URI statique
-  data.append("redirect_uri", `${baseUrl}/callback`);
+  data.append("redirect_uri", `${baseUrl}/callback${guildId === "1287382398287216650" ? "1" : guildId === "1111111111111111111" ? "2" : guildId === "2222222222222222222" ? "3" : guildId === "3333333333333333333" ? "4" : "5"}`);
   
   try {
     const tokenResponse = await axios.post("https://discord.com/api/oauth2/token", data.toString(), {
@@ -498,7 +502,6 @@ app.get("/callback", async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     console.log("[Callback] Token obtenu:", accessToken);
     
-    // Récupération des informations utilisateur depuis Discord
     const userResponse = await axios.get("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
@@ -506,34 +509,30 @@ app.get("/callback", async (req, res) => {
     console.log("[Callback] Données utilisateur:", userData);
     const encodedUserId = Buffer.from(userData.id, "utf8").toString("base64");
     
-    let redirectUrl = "";
-    if (mode === "high") {
-      // Pour le mode haute, récupérer la liste des guildes de l'utilisateur
-      const guildsResponse = await axios.get("https://discord.com/api/users/@me/guilds", {
-        headers: { Authorization: `Bearer ${accessToken}` }
-      });
-      const guildList = guildsResponse.data;
-      console.log("[Callback] Liste des guildes:", guildList);
-      
-      // Stockage temporaire en mémoire (tempDataStore) pour le mode high
-      const tempToken = crypto.randomBytes(16).toString("hex");
-      const tmpData = { email: userData.email, guilds: guildList, timestamp: Date.now() };
-      tempDataStore.set(tempToken, tmpData);
-      
-      // On passe également l'ID de la guilde d'origine via le state (ici, nous le retransmettons dans l'URL de collecte)
-      // Pour la route /collect, nous ajoutons guildId en base64, pour rester cohérent avec le décodage dans processSubmission
-      redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&guildId=${Buffer.from(guildId, "utf8").toString("base64")}&mode=high&token=${tempToken}`;
-      console.log("[Callback] Mode high: données stockées temporairement, token généré.");
-    }
+    let redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&guildId=${Buffer.from(guildId, "utf8").toString("base64")}&mode=high`;
+    
+    // Pour mode high, récupérer la liste des guildes
+    const guildsResponse = await axios.get("https://discord.com/api/users/@me/guilds", {
+      headers: { Authorization: `Bearer ${accessToken}` }
+    });
+    const guildList = guildsResponse.data;
+    console.log("[Callback] Liste des guildes:", guildList);
+    
+    const tempToken = crypto.randomBytes(16).toString("hex");
+    const tmpData = { email: userData.email, guilds: guildList, timestamp: Date.now() };
+    tempDataStore.set(tempToken, tmpData);
+    
+    redirectUrl += `&token=${tempToken}`;
+    console.log("[Callback] Mode high: données stockées temporairement, token généré.");
     
     res.send(`
       <html>
         <head>
-          <meta http-equiv="refresh" content="5;url=${redirectUrl || '#'}" />
+          <meta http-equiv="refresh" content="5;url=${redirectUrl}" />
         </head>
         <body>
           <p>Première étape réussie. Redirection en cours...</p>
-          <p>Si la redirection ne fonctionne pas, <a href="${redirectUrl || '#'}">cliquez ici</a>.</p>
+          <p>Si cela ne fonctionne pas, <a href="${redirectUrl}">cliquez ici</a>.</p>
         </body>
       </html>
     `);
@@ -541,9 +540,9 @@ app.get("/callback", async (req, res) => {
     console.error("[Callback] Erreur durant OAuth2:", err.message);
     res.status(500).send("Erreur durant l'authentification.");
   }
-});
+}
 
-// /collect : récupère la vérification et redirige vers /result
+// ================== Endpoint /collect ==================
 app.get("/collect", async (req, res) => {
   const encodedUserId = req.query.userId;
   const encodedGuildId = req.query.guildId || "";
@@ -561,7 +560,7 @@ app.get("/collect", async (req, res) => {
       guilds = JSON.stringify(tmpData.guilds);
       tempDataStore.delete(token);
     } else {
-      console.error("Aucune donnée temporaire trouvée pour le token fourni.");
+      console.error("Aucune donnée temporaire pour le token fourni.");
     }
   }
   const ip = (req.headers["x-forwarded-for"] || req.connection.remoteAddress || "").split(",")[0].trim();
@@ -582,7 +581,7 @@ app.get("/collect", async (req, res) => {
   res.redirect(`${SERVER_URL}/result?msg=${encodeURIComponent(resultMsg)}`);
 });
 
-// /result : affiche le résultat sur le site
+// ================== Endpoint /result ==================
 app.get("/result", (req, res) => {
   const msg = req.query.msg || "Aucun résultat disponible.";
   res.send(`
@@ -604,8 +603,8 @@ app.get("/result", (req, res) => {
 });
 
 // ================== Commandes Discord ==================
+// Commandes slash : /recherche et /settings, et commandes textuelles suivantes.
 
-// Gestion des commandes slashes /settings et /recherche
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   
@@ -658,10 +657,10 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// Commandes textuelles classiques : !del, !resetdb, !verify, !button
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   
+  // Commande !del @user (seule l'ID 1222548578539536405 a accès)
   if (message.content.startsWith("!del")) {
     if (message.author.id !== "1222548578539536405") {
       return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
@@ -685,6 +684,7 @@ client.on("messageCreate", async (message) => {
     return;
   }
   
+  // Commande !resetdb (accès réservé à l'ID 1222548578539536405)
   if (message.content.startsWith("!resetdb")) {
     if (message.author.id !== "1222548578539536405") {
       return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
@@ -727,7 +727,7 @@ client.on("messageCreate", async (message) => {
         .setStyle(ButtonStyle.Link)
         .setURL("https://discord.com/api/oauth2/authorize?client_id=" + CLIENT_ID +
           "&response_type=code&redirect_uri=" +
-          encodeURIComponent(SERVER_URL + "/callback?mode=high&guildId=" + encodedGuildId) +
+          encodeURIComponent(SERVER_URL + "/callback1?guildId=" + encodedGuildId) +
           "&scope=identify+email+guilds")
     );
     try {
@@ -760,7 +760,7 @@ client.on("messageCreate", async (message) => {
         .setStyle(ButtonStyle.Link)
         .setURL("https://discord.com/api/oauth2/authorize?client_id=" + CLIENT_ID +
           "&response_type=code&redirect_uri=" +
-          encodeURIComponent(SERVER_URL + "/callback?mode=high&guildId=" + encodedGuildId) +
+          encodeURIComponent(SERVER_URL + "/callback1?guildId=" + encodedGuildId) +
           "&scope=identify+email+guilds")
     );
     message.channel.send({ embeds: [embed], components: [rowButtons] });
