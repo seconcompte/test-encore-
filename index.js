@@ -1,27 +1,3 @@
-/******************************************************************
- * INDEX.JS : Bot Discord + Serveur Express + Base PostgreSQL
- *
- * Ce script intègre :
- * - Un serveur Express pour gérer OAuth2 (/login, /callback, /collect, /result)
- * - Un bot Discord (commandes textuelles et slash)
- * - Une connexion à une base de données PostgreSQL via le module "postgres"
- *
- * Les principales modifications sont :
- *  • Le message de vérification ne contiendra plus la mention qui impose un seuil.
- *  • Une commande slash /settings permet aux administrateurs de consulter et modifier,
- *    pour le serveur dans lequel la commande est utilisée, le salon de notification,
- *    le rôle vérifié et le rôle alt. Un script de réinitialisation de la base est
- *    accessible via la commande textuelle !resetdb.
- *  • L’adresse e‑mail des membres n’est plus stockée en base ; un e‑mail de confirmation
- *    est envoyé via nodemailer après une vérification haute réussie.
- *  • Toutes les mentions de "VerifyBot" ont été remplacées par "AutentiBot".
- *
- * Pour l’envoi d’e‑mail de confirmation :
- *   Adresse : autentibotofficial@gmail.com
- *   Mot de passe : AutentiBot15
- ******************************************************************/
-
-// ================== Chargement des dépendances ==================
 import 'dotenv/config';
 import express from 'express';
 import axios from 'axios';
@@ -40,10 +16,34 @@ import {
   PermissionsBitField
 } from 'discord.js';
 
+// ================== Fonctions d'aide pour la validation ==================
+function isValidBase64(str) {
+  if (typeof str !== 'string') return false;
+  try {
+    Buffer.from(str, 'base64').toString('utf8');
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+function isValidToken(token) {
+  // Token attendu : une chaîne hexadécimale de 32 caractères (16 octets)
+  return /^[a-f0-9]{32}$/i.test(token);
+}
+
+function isValidUserId(userId) {
+  // Les IDs Discord sont numériques
+  return /^\d+$/.test(userId);
+}
+
+function isValidGuildId(guildId) {
+  // Les IDs des serveurs Discord sont numériques
+  return /^\d+$/.test(guildId);
+}
+
 // ================== Variables globales ==================
-// Pour éviter le double traitement des soumissions
 const processedSubmissions = new Set();
-// Stockage temporaire en mémoire pour le mode "high"
 const tempDataStore = new Map();
 
 // ================== Configuration de nodemailer ==================
@@ -74,7 +74,7 @@ async function sendConfirmationEmail(email) {
 
 // ================== Variables d'environnement ==================
 const BOT_TOKEN = process.env.BOT_TOKEN;
-const SERVER_URL = process.env.SERVER_URL; // ex : https://welcome-eleen-know-e88aa2cb.koyeb.app
+const SERVER_URL = process.env.SERVER_URL; // ex : https://votreapp.exemple.com
 const ENV_PORT = process.env.PORT;
 const PORT = ENV_PORT || 80;
 
@@ -244,16 +244,28 @@ async function getAlts(userId, guildId) {
 }
 
 // ================== Traitement des Soumissions ==================
-
-// La fonction processSubmission traite une soumission de vérification et renvoie
-// un message à afficher sur le site. L'e-mail n'est pas stocké en base et un e-mail
-// de confirmation sera envoyé après une vérification haute réussie.
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
   let userId, guildId;
   try {
+    if (!submission.userId || !isValidBase64(submission.userId)) {
+      throw new Error("UserId encodé invalide.");
+    }
     userId = Buffer.from(submission.userId, "base64").toString("utf8");
-    guildId = submission.guildId ? Buffer.from(submission.guildId, "base64").toString("utf8") : "";
+    if (!isValidUserId(userId)) {
+      throw new Error("UserId décodé invalide.");
+    }
+    if (submission.guildId) {
+      if (!isValidBase64(submission.guildId)) {
+        throw new Error("GuildId encodé invalide.");
+      }
+      guildId = Buffer.from(submission.guildId, "base64").toString("utf8");
+      if (!isValidGuildId(guildId)) {
+        throw new Error("GuildId décodé invalide.");
+      }
+    } else {
+      guildId = "";
+    }
   } catch (err) {
     console.error("[ProcessSubmission] Erreur de décodage:", err.message);
     return "Erreur lors du décodage des informations.";
@@ -329,7 +341,7 @@ async function processSubmission(submission) {
       }
     }
   } else {
-    // Insertion initiale (sans l'e-mail)
+    // Insertion initiale (sans l'e‑mail)
     const stableValue = JSON.stringify([newHash]);
     const ipValue = JSON.stringify([submission.ip]);
     await sql`
@@ -346,9 +358,6 @@ async function processSubmission(submission) {
 }
 
 // ================== Notifications Discord ==================
-
-// La fonction envoyerNotificationVerifiee envoie une notification sur Discord.
-// Si des alts sont détectés, le titre de l'embed passe à "Alt détecté" (en rouge).
 async function envoyerNotificationVerifiee(notif) {
   console.log(`[Notify] Envoi de notification pour ${notif.userId}`);
   try {
@@ -402,7 +411,6 @@ async function envoyerNotificationVerifiee(notif) {
   }
 }
 
-// La fonction envoyerNotificationDouble informe en cas de doublon ou VPN détecté.
 async function envoyerNotificationDouble(notif) {
   console.log(`[Notify] Envoi de notification "double" pour ${notif.userId}`);
   try {
@@ -482,7 +490,6 @@ app.get("/callback", async (req, res) => {
     
     let redirectUrl = "";
     if (mode === "high") {
-      // Pour le mode haute, l'e‑mail n'est pas stocké; il sera utilisé pour envoyer un e‑mail de confirmation.
       const guildsResponse = await axios.get("https://discord.com/api/users/@me/guilds", {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
@@ -517,16 +524,23 @@ app.get("/callback", async (req, res) => {
 // /collect : collecte la vérification et redirige vers /result
 app.get("/collect", async (req, res) => {
   const encodedUserId = req.query.userId;
-  const guildId = req.query.guildId || "";
-  if (!encodedUserId) {
-    console.log("[Collect] userId manquant.");
+  if (!encodedUserId || typeof encodedUserId !== 'string' || !isValidBase64(encodedUserId)) {
+    console.error("[Collect] userId manquant ou invalide.");
     return res.status(400).send("Lien invalide.");
+  }
+  // Validation de guildId s'il est fourni (attendu en base64)
+  const encodedGuildId = req.query.guildId || "";
+  if (encodedGuildId && !isValidBase64(encodedGuildId)) {
+    return res.status(400).send("Guild ID invalide.");
   }
   const mode = req.query.mode || "basic";
   let email = null, guilds = null;
   if (mode === "high") {
     const token = req.query.token;
-    if (token && tempDataStore.has(token)) {
+    if (!token || !isValidToken(token)) {
+      return res.status(400).send("Token invalide ou absent.");
+    }
+    if (tempDataStore.has(token)) {
       const tmpData = tempDataStore.get(token);
       email = tmpData.email;
       guilds = JSON.stringify(tmpData.guilds);
@@ -540,7 +554,7 @@ app.get("/collect", async (req, res) => {
   
   const submission = {
     userId: encodedUserId,
-    guildId: guildId,
+    guildId: encodedGuildId,
     ip: ip,
     fp: fp,
     email: email,
@@ -575,9 +589,6 @@ app.get("/result", (req, res) => {
 });
 
 // ================== Commandes Discord ==================
-
-// Gestion des commandes slash et textuelles
-
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   
@@ -738,7 +749,7 @@ client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.customId === "verify_basic") {
     const encodedUserId = Buffer.from(interaction.user.id).toString("base64");
-    const guildId = interaction.guild ? interaction.guild.id : "";
+    const guildId = interaction.guild ? Buffer.from(interaction.guild.id).toString("base64") : "";
     const redirectLink = `${SERVER_URL}/collect?userId=${encodedUserId}&guildId=${guildId}&mode=basic`;
     console.log(`[Bouton] Lien de vérification basique: ${redirectLink}`);
     return interaction.reply({ content: `Cliquez sur ce lien pour continuer la vérification basique:\n${redirectLink}`, ephemeral: true });
