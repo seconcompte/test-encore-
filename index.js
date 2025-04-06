@@ -440,38 +440,57 @@ app.get("/", (req, res) => {
   res.send("Bienvenue sur l'application AutentiBot.");
 });
 
-// /login : redirige vers l'OAuth2 de Discord en mode haute
+// /login : redirige vers OAuth2 de Discord en mode haute en utilisant "state"
 app.get("/login", (req, res) => {
-  const mode = req.query.mode === "high" ? "high" : "basic";
-  if (mode !== "high") {
-    return res.status(400).send("La vérification basique ne nécessite pas OAuth2.");
-  }
-  // Encodage de l'id de la guilde pour le transmettre dans l'URL
-  const encodedGuildId = req.query.guildId || "";
-  const redirectUri = encodeURIComponent(`${SERVER_URL}/callback?mode=high&guildId=${encodedGuildId}`);
+  // On peut récupérer l'ID de la guilde (server) depuis req.query si besoin
+  const guildId = req.query.guildId || "";
+  
+  // Création de l'objet state contenant les données dynamiques
+  const stateData = {
+    mode: "high",
+    guildId: guildId  // Conserver par exemple "1287382398287216650"
+  };
+  const stateParam = Buffer.from(JSON.stringify(stateData)).toString("base64");
+
+  // Votre URI de redirection doit rester statique et identique à celle configurée dans Discord
+  const redirectUri = encodeURIComponent(`${SERVER_URL}/callback`);
   const scope = encodeURIComponent("identify email guilds");
-  const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}`;
+
+  const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${redirectUri}&scope=${scope}&state=${stateParam}`;
   console.log(`[OAuth] URL générée: ${oauthUrl}`);
   res.redirect(oauthUrl);
 });
 
-// /callback : échange du code OAuth2 et collecte des infos utilisateur
+// /callback : échange du code OAuth2 et collecte les infos utilisateur
 app.get("/callback", async (req, res) => {
-  const mode = req.query.mode === "high" ? "high" : "basic";
+  // Récupération et décodage du paramètre "state"
+  const stateParam = req.query.state;
+  let stateData = {};
+  if (stateParam) {
+    try {
+      stateData = JSON.parse(Buffer.from(stateParam, 'base64').toString('utf8'));
+    } catch (e) {
+      console.error("Erreur lors du décodage du state :", e);
+    }
+  }
+  const mode = stateData.mode || "basic";
+  const guildId = stateData.guildId || "";
+  
   const code = req.query.code;
   if (!code) {
     console.log("[Callback] Aucun code reçu.");
     return res.status(400).send("Code d'autorisation manquant.");
   }
+  
   const baseUrl = SERVER_URL.replace(/\/$/, "");
   const data = new URLSearchParams();
   data.append("client_id", CLIENT_ID);
   data.append("client_secret", CLIENT_SECRET);
   data.append("grant_type", "authorization_code");
   data.append("code", code);
-  // On transmet également l'ID de la guilde (encodé)
-  const encodedGuildId = req.query.guildId || "";
-  data.append("redirect_uri", `${baseUrl}/callback?mode=high&guildId=${encodedGuildId}`);
+  // On utilise l'URI statique
+  data.append("redirect_uri", `${baseUrl}/callback`);
+  
   try {
     const tokenResponse = await axios.post("https://discord.com/api/oauth2/token", data.toString(), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -479,6 +498,7 @@ app.get("/callback", async (req, res) => {
     const accessToken = tokenResponse.data.access_token;
     console.log("[Callback] Token obtenu:", accessToken);
     
+    // Récupération des informations utilisateur depuis Discord
     const userResponse = await axios.get("https://discord.com/api/users/@me", {
       headers: { Authorization: `Bearer ${accessToken}` }
     });
@@ -488,16 +508,21 @@ app.get("/callback", async (req, res) => {
     
     let redirectUrl = "";
     if (mode === "high") {
+      // Pour le mode haute, récupérer la liste des guildes de l'utilisateur
       const guildsResponse = await axios.get("https://discord.com/api/users/@me/guilds", {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const guildList = guildsResponse.data;
       console.log("[Callback] Liste des guildes:", guildList);
-      // Récupération du token temporaire pour le stockage en mémoire, comme avant
+      
+      // Stockage temporaire en mémoire (tempDataStore) pour le mode high
       const tempToken = crypto.randomBytes(16).toString("hex");
       const tmpData = { email: userData.email, guilds: guildList, timestamp: Date.now() };
       tempDataStore.set(tempToken, tmpData);
-      redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&guildId=${encodedGuildId}&mode=high&token=${tempToken}`;
+      
+      // On passe également l'ID de la guilde d'origine via le state (ici, nous le retransmettons dans l'URL de collecte)
+      // Pour la route /collect, nous ajoutons guildId en base64, pour rester cohérent avec le décodage dans processSubmission
+      redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&guildId=${Buffer.from(guildId, "utf8").toString("base64")}&mode=high&token=${tempToken}`;
       console.log("[Callback] Mode high: données stockées temporairement, token généré.");
     }
     
