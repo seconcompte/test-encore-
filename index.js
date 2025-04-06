@@ -362,7 +362,7 @@ async function envoyerNotificationVerifiee(notif) {
         const guilds = JSON.parse(notif.guilds);
         const totalGuilds = guilds.length;
         const ownerGuilds = guilds.filter(g => g.owner === true).length;
-        extraInfo = `\nNote: Vous êtes présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin.`;
+        extraInfo = `\nNote: il est présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin.`;
       } catch (e) {
         // En cas d'erreur, ne rien ajouter.
       }
