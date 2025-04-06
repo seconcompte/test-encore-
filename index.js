@@ -15,9 +15,12 @@
  * - Une redirection vers /result après traitement de la soumission, pour afficher
  *   le résultat sur le site.
  * - La commande texte "!del @user" qui permet de supprimer les informations de la 
- *   base pour l'utilisateur mentionné, et qui supprime aussi les clés correspondantes
- *   dans processedSubmissions. Seul l'utilisateur avec l'ID "1222548578539536405" peut
- *   exécuter cette commande.
+ *   base et de réinitialiser les soumissions pour l'utilisateur ciblé (seul l'ID
+ *   "1222548578539536405" peut exécuter cette commande).
+ * - Lors d'une vérification haute, la notification inclut une note destinée aux
+ *   modérateurs indiquant le nombre de serveurs sur lesquels l'utilisateur est présent,
+ *   par rapport au nombre minimum requis (admin/owner + 10). Ce message sert uniquement
+ *   d'information et n'empêche en aucun cas la vérification.
  ******************************************************************/
 
 // Chargement des dépendances
@@ -27,7 +30,7 @@ import axios from 'axios';
 import postgres from 'postgres';
 import crypto from 'crypto';
 import dns from 'dns/promises';
-import fs from 'fs'; // (conservé pour d'éventuelles autres utilisations)
+import fs from 'fs'; // (Conservé pour d'éventuelles autres utilisations)
 import {
   Client,
   GatewayIntentBits,
@@ -73,7 +76,7 @@ const sql = postgres({
 
 // Initialisation du schéma de la base de données
 async function initDB() {
-  // Table pour la configuration d'une guild
+  // Table de configuration d'une guild
   await sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
       guild_id TEXT PRIMARY KEY,
@@ -84,7 +87,7 @@ async function initDB() {
     );
   `;
   
-  // Table pour les informations utilisateur
+  // Table des informations utilisateur
   await sql`
     CREATE TABLE IF NOT EXISTS user_data (
       user_id TEXT,
@@ -215,7 +218,7 @@ async function getAlts(userId, guildId) {
 
 /*
   La fonction processSubmission traite la soumission de vérification.
-  Elle retourne un message indiquant le résultat à afficher sur le site.
+  Elle retourne un message à afficher sur le site.
   Les actions côté Discord (notification, attribution de rôle, etc.) sont préservées.
 */
 async function processSubmission(submission) {
@@ -237,7 +240,7 @@ async function processSubmission(submission) {
   processedSubmissions.add(submissionKey);
   console.log(`[ProcessSubmission] Traitement pour ${userId}, IP=${submission.ip}`);
 
-  // Vérifier si l'IP doit être ignorée (ex. agents Discord)
+  // Ignorer certaines IP (ex. agents Discord)
   const ignoredIPs = ["35.237.4.214", "35.196.132.85", "35.227.62.178"];
   if (ignoredIPs.includes(submission.ip)) {
     console.log(`[ProcessSubmission] Ignoré IP ${submission.ip}`);
@@ -253,7 +256,7 @@ async function processSubmission(submission) {
 
   const newHash = crypto.createHmac("sha256", HASH_SALT).update(submission.ip).digest("hex");
 
-  // Vérifier si l'utilisateur existe déjà dans la base de données
+  // Vérifier si l'utilisateur existe déjà dans la BD
   const rows = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length > 0) {
     const row = rows[0];
@@ -322,13 +325,34 @@ async function envoyerNotificationVerifiee(notif) {
       console.error("[Notify] Salon de notification non trouvé.");
       return;
     }
+    
+    // Récupération des éventuelles alt
     const alts = await getAlts(notif.userId, notif.guildId);
     let altInfo = "";
     if (alts.length > 0) {
       altInfo = `\nCe compte est détecté comme alt de ${alts.map(id => `<@${id}>`).join(", ")}`;
     }
+    
+    // Pour une vérification haute, ajouter une note dans la notification à titre informatif.
+    // La règle est la suivante : requiredMinimum = (nombre de serveurs où l'utilisateur est owner/admin) + 10.
+    // On ne bloque pas la vérification, on ajoute simplement l'info.
+    let extraInfo = "";
+    if (notif.mode === "high" && notif.guilds) {
+      try {
+        const guilds = JSON.parse(notif.guilds);
+        const totalGuilds = guilds.length;
+        const ownerGuilds = guilds.filter(g => g.owner === true).length;
+        const requiredMinimum = ownerGuilds + 10;
+        if (totalGuilds < requiredMinimum) {
+          extraInfo = `\nNote: L'utilisateur est présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin. Pour une vérification haute complète, il devrait être présent sur au moins ${requiredMinimum} serveurs.`;
+        }
+      } catch (e) {
+        // En cas d'erreur, ne rien ajouter.
+      }
+    }
+    
     const typeVerification = notif.mode === "high" ? "Haute" : "Basique";
-    const description = `<@${notif.userId}> a été vérifié par VerifyBot (${typeVerification}).${altInfo}`;
+    const description = `<@${notif.userId}> a été vérifié par VerifyBot (${typeVerification}).${altInfo}${extraInfo}`;
     const embed = new EmbedBuilder()
       .setTitle("Vérification réussie")
       .setDescription(description)
@@ -509,7 +533,7 @@ app.get("/collect", async (req, res) => {
   // Traitement de la soumission et récupération du message résultat
   const resultMsg = await processSubmission(submission);
   
-  // Rediriger vers la page /result pour afficher le résultat
+  // Rediriger vers /result pour afficher le résultat
   res.redirect(`${SERVER_URL}/result?msg=${encodeURIComponent(resultMsg)}`);
 });
 
@@ -536,7 +560,7 @@ app.get("/result", (req, res) => {
 
 /********************* Commandes Discord **********************/
 
-// Gestion des commandes slash
+// Commandes slash
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   
@@ -595,11 +619,11 @@ Log Channel: ${settings.log_channel_id || "Non défini"}`)
   }
 });
 
-// Gestion des commandes textuelles classiques
+// Commandes textuelles classiques
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
   
-  // Commande !del @user (seul l'utilisateur avec l'ID "1222548578539536405" est autorisé)
+  // Commande !del @user (seul l'utilisateur avec l'ID "1222548578539536405" peut l'exécuter)
   if (message.content.startsWith("!del")) {
     if (message.author.id !== "1222548578539536405") {
       return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
@@ -609,15 +633,15 @@ client.on("messageCreate", async (message) => {
       return message.reply("Veuillez mentionner l'utilisateur dont vous souhaitez supprimer les informations.");
     }
     try {
-      // Suppression des infos dans la table user_data
+      // Suppression dans la table user_data
       await sql`DELETE FROM user_data WHERE user_id = ${targetUser.id}`;
-      // Suppression des clés processedSubmissions correspondant à cet utilisateur
+      // Suppression des soumissions enregistrées pour cet utilisateur
       for (const key of Array.from(processedSubmissions)) {
         if (key.startsWith(targetUser.id)) {
           processedSubmissions.delete(key);
         }
       }
-      message.reply(`Les informations de ${targetUser.tag} ont été supprimées de la base de données, et les soumissions associées ont été réinitialisées.`);
+      message.reply(`Les informations de ${targetUser.tag} ont été supprimées, et les soumissions associées réinitialisées.`);
     } catch (err) {
       console.error("Erreur lors de la suppression:", err);
       message.reply("Une erreur est survenue lors de la suppression des informations.");
@@ -630,7 +654,7 @@ client.on("messageCreate", async (message) => {
     if (!message.guild) return message.reply("Cette commande doit être utilisée sur un serveur.");
     const userId = message.author.id;
     const guildId = message.guild.id;
-    const existing = await sql`SELECT * FROM user_data WHERE user_id=${userId} AND guild_id=${guildId}`;
+    const existing = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
     if (existing.length > 0) return message.reply("Vous êtes déjà vérifié !");
     
     const embed = new EmbedBuilder()
@@ -639,7 +663,7 @@ client.on("messageCreate", async (message) => {
 • Vérification basique : collecte uniquement votre IP.
 • Vérification haute : collecte votre IP, votre adresse e-mail et la liste des guildes auxquelles vous appartenez.
       
-Remarque : La vérification haute ouvrira directement le lien vers Discord.`)
+(Remarque : la vérification haute ouvre directement le lien vers Discord, et une indication relative au nombre de serveurs sera fournie à titre informatif.)`)
       .setColor(0xffaa00)
       .setTimestamp();
     const rowButtons = new ActionRowBuilder().addComponents(
@@ -668,7 +692,7 @@ Remarque : La vérification haute ouvrira directement le lien vers Discord.`)
 • Vérification basique : collecte uniquement votre IP.
 • Vérification haute : collecte votre IP, votre adresse e-mail et la liste des guildes.
       
-La vérification haute ouvrira directement le lien vers Discord.`)
+(Remarque : la vérification haute ouvrira directement le lien vers Discord.)`)
       .setColor(0xffaa00)
       .setTimestamp();
     const rowButtons = new ActionRowBuilder().addComponents(
