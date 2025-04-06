@@ -6,20 +6,19 @@
  * - Un bot Discord (commandes textuelles et slash)
  * - Une connexion à une base de données PostgreSQL via le module "postgres"
  *
- * La fonction initDB() crée automatiquement les tables nécessaires
- * (guild_settings et user_data) si elles n'existent pas.
+ * Les principales modifications sont :
+ *  • Le message de vérification ne contiendra plus la mention qui impose un seuil.
+ *  • Une commande slash /settings permet aux administrateurs de consulter et modifier,
+ *    pour le serveur dans lequel la commande est utilisée, le salon de notification,
+ *    le rôle vérifié et le rôle alt. Un script de réinitialisation de la base est
+ *    accessible via la commande textuelle !resetdb.
+ *  • L’adresse e‑mail des membres n’est plus stockée en base ; un e‑mail de confirmation
+ *    est envoyé via nodemailer après une vérification haute réussie.
+ *  • Toutes les mentions de "VerifyBot" ont été remplacées par "AutentiBot".
  *
- * Changements :
- *  • Le message de vérification haute ne contient plus la mention 
- *    "Pour une vérification haute complète, il devrait être présent sur au moins 11 serveurs."
- *  • La commande slash /settings permet de consulter et modifier les paramètres
- *    basiques (salon de notification, rôle vérifié et rôle alt) pour le seul serveur
- *    dans lequel elle est utilisée (seuls les admins peuvent l'exécuter). Un script
- *    de réinitialisation de la base est accessible via la commande !resetdb.
- *  • L’adresse e‑mail des membres n’est plus stockée en base, mais un e‑mail
- *    de confirmation est envoyé à l’utilisateur (via nodemailer avec les identifiants
- *    autentibotofficial@gmail.com / AutentiBot15).
- *  • Toutes les références à "VerifyBot" ont été remplacées par "AutentiBot".
+ * Pour l’envoi d’e‑mail de confirmation :
+ *   Adresse : autentibotofficial@gmail.com
+ *   Mot de passe : AutentiBot15
  ******************************************************************/
 
 // ================== Chargement des dépendances ==================
@@ -29,7 +28,7 @@ import axios from 'axios';
 import postgres from 'postgres';
 import crypto from 'crypto';
 import dns from 'dns/promises';
-import fs from 'fs'; // Conservé pour d'éventuelles autres utilisations
+import fs from 'fs';
 import nodemailer from 'nodemailer';
 import {
   Client,
@@ -52,9 +51,26 @@ const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
     user: 'autentibotofficial@gmail.com',
-    pass: 'AutentiBot152'
+    pass: 'AutentiBot15'
   }
 });
+
+// ================== Fonction d'envoi d'e‑mail de confirmation ==================
+async function sendConfirmationEmail(email) {
+  const mailOptions = {
+    from: 'autentibotofficial@gmail.com',
+    to: email,
+    subject: 'Confirmation de vérification - AutentiBot',
+    text: "Bonjour,\n\nVotre vérification a été effectuée avec succès par AutentiBot.\n\nCordialement,\nL'équipe AutentiBot"
+  };
+
+  try {
+    const info = await transporter.sendMail(mailOptions);
+    console.log("E-mail de confirmation envoyé :", info.response);
+  } catch (error) {
+    console.error("Erreur lors de l'envoi de l'e‑mail de confirmation :", error);
+  }
+}
 
 // ================== Variables d'environnement ==================
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -84,7 +100,7 @@ const sql = postgres({
   ssl: 'require'
 });
 
-// ================== Initialisation de la base de données ==================
+// ================== Initialisation de la Base de Données ==================
 async function initDB() {
   await sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
@@ -109,7 +125,7 @@ async function initDB() {
   console.log("Database initialized.");
 }
 
-// Fonction pour réinitialiser la BD (accessible via la commande !resetdb)
+// Fonction pour réinitialiser la base de données (accessible via la commande !resetdb)
 async function resetDB() {
   await sql`DROP TABLE IF EXISTS user_data;`;
   await sql`DROP TABLE IF EXISTS guild_settings;`;
@@ -132,7 +148,7 @@ app.use(express.json());
 
 // ================== Fonctions Utilitaires ==================
 
-// Détection VPN via API externe
+// Détection VPN via une API externe
 async function detectVPNviaAPI(ip) {
   const apiKey = "9a038c170f4d4066a865bd351eddc920";
   try {
@@ -229,12 +245,9 @@ async function getAlts(userId, guildId) {
 
 // ================== Traitement des Soumissions ==================
 
-/*
-  La fonction processSubmission traite une soumission de vérification et renvoie
-  un message à afficher sur le site.
-  - L'e-mail n'est plus stockée dans la BD (elle reste à null).
-  - Un e-mail de confirmation est envoyé après une vérification haute réussie.
-*/
+// La fonction processSubmission traite une soumission de vérification et renvoie
+// un message à afficher sur le site. L'e-mail n'est pas stocké en base et un e-mail
+// de confirmation sera envoyé après une vérification haute réussie.
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
   let userId, guildId;
@@ -245,7 +258,7 @@ async function processSubmission(submission) {
     console.error("[ProcessSubmission] Erreur de décodage:", err.message);
     return "Erreur lors du décodage des informations.";
   }
-  
+
   const submissionKey = `${userId}-${submission.ip}-${submission.mode}`;
   if (processedSubmissions.has(submissionKey)) {
     console.log(`[ProcessSubmission] Déjà traité pour ${userId}, IP=${submission.ip}`);
@@ -254,7 +267,7 @@ async function processSubmission(submission) {
   processedSubmissions.add(submissionKey);
   console.log(`[ProcessSubmission] Traitement pour ${userId}, IP=${submission.ip}`);
 
-  // Ignorer certaines IP
+  // Ignorer certaines IP (ex. agents Discord)
   const ignoredIPs = ["35.237.4.214", "35.196.132.85", "35.227.62.178"];
   if (ignoredIPs.includes(submission.ip)) {
     console.log(`[ProcessSubmission] Ignoré IP ${submission.ip}`);
@@ -270,6 +283,7 @@ async function processSubmission(submission) {
 
   const newHash = crypto.createHmac("sha256", HASH_SALT).update(submission.ip).digest("hex");
 
+  // Vérifier si l'utilisateur existe déjà dans la BD
   const rows = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length > 0) {
     const row = rows[0];
@@ -299,7 +313,6 @@ async function processSubmission(submission) {
         }
         if (!oldIPs.includes(submission.ip)) oldIPs.push(submission.ip);
 
-        // Mise à jour sans conserver l'e-mail
         await sql`
           UPDATE user_data
           SET stable_hash = ${JSON.stringify(oldHashes)},
@@ -316,7 +329,7 @@ async function processSubmission(submission) {
       }
     }
   } else {
-    // Insertion initiale sans l'e-mail
+    // Insertion initiale (sans l'e-mail)
     const stableValue = JSON.stringify([newHash]);
     const ipValue = JSON.stringify([submission.ip]);
     await sql`
@@ -334,12 +347,8 @@ async function processSubmission(submission) {
 
 // ================== Notifications Discord ==================
 
-/*
-  La fonction envoyerNotificationVerifiee envoie une notification sur Discord.
-  - Si des alts sont détectés, le titre de l'embed passe à "Alt détecté" (en rouge).
-  - Pour le mode haute, une note indique uniquement le nombre total de serveurs et
-    le nombre en tant qu'owner/admin (sans mentionner un seuil).
-*/
+// La fonction envoyerNotificationVerifiee envoie une notification sur Discord.
+// Si des alts sont détectés, le titre de l'embed passe à "Alt détecté" (en rouge).
 async function envoyerNotificationVerifiee(notif) {
   console.log(`[Notify] Envoi de notification pour ${notif.userId}`);
   try {
@@ -349,25 +358,25 @@ async function envoyerNotificationVerifiee(notif) {
       console.error("[Notify] Salon de notification non trouvé.");
       return;
     }
-    
+
     const alts = await getAlts(notif.userId, notif.guildId);
     let altInfo = "";
     if (alts.length > 0) {
       altInfo = `\nCe compte est détecté comme alt de ${alts.map(id => `<@${id}>`).join(", ")}`;
     }
-    
+
     let extraInfo = "";
     if (notif.mode === "high" && notif.guilds) {
       try {
         const guilds = JSON.parse(notif.guilds);
         const totalGuilds = guilds.length;
         const ownerGuilds = guilds.filter(g => g.owner === true).length;
-        extraInfo = `\nNote: il est présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin.`;
+        extraInfo = `\nNote: Vous êtes présent sur ${totalGuilds} serveurs, dont ${ownerGuilds} en tant qu’owner/admin.`;
       } catch (e) {
-        // En cas d'erreur, ne rien ajouter.
+        // Erreur lors du parsing, ne rien ajouter
       }
     }
-    
+
     const typeVerification = notif.mode === "high" ? "Haute" : "Basique";
     const description = `<@${notif.userId}> a été vérifié par AutentiBot (${typeVerification}).${altInfo}${extraInfo}`;
     
@@ -378,7 +387,7 @@ async function envoyerNotificationVerifiee(notif) {
       embed.setTitle("Vérification réussie").setColor(0x00ff00);
     }
     embed.setDescription(description).setTimestamp();
-    
+
     await notifChannel.send({ embeds: [embed] });
     console.log("[Notify] Notification envoyée.");
 
@@ -393,7 +402,7 @@ async function envoyerNotificationVerifiee(notif) {
   }
 }
 
-// Notification en cas de doublon ou de VPN détecté
+// La fonction envoyerNotificationDouble informe en cas de doublon ou VPN détecté.
 async function envoyerNotificationDouble(notif) {
   console.log(`[Notify] Envoi de notification "double" pour ${notif.userId}`);
   try {
@@ -429,7 +438,7 @@ app.get("/", (req, res) => {
   res.send("Bienvenue sur l'application AutentiBot.");
 });
 
-// /login : redirige vers OAuth2 de Discord en mode haute
+// /login : redirection vers OAuth2 de Discord en mode haute
 app.get("/login", (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   if (mode !== "high") {
@@ -473,23 +482,14 @@ app.get("/callback", async (req, res) => {
     
     let redirectUrl = "";
     if (mode === "high") {
-      // Pour le mode haute, on n'enregistre pas l'e‑mail ; on le transmet pour envoyer un e‑mail de confirmation
-      const iv = crypto.randomBytes(16);
-      const cipher = crypto.createCipheriv("aes-192-cbc", Buffer.from("VerifyBotOfficialsqj554d", "utf8"), iv);
-      let encryptedEmail = cipher.update(userData.email, "utf8", "hex");
-      encryptedEmail += cipher.final("hex");
-      // On ne stocke pas cet e‑mail en base, mais on transmet l'adresse pour l'envoi
-      const finalEncryptedEmail = iv.toString("hex") + ":" + encryptedEmail;
-      
+      // Pour le mode haute, l'e‑mail n'est pas stocké; il sera utilisé pour envoyer un e‑mail de confirmation.
       const guildsResponse = await axios.get("https://discord.com/api/users/@me/guilds", {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
       const guildList = guildsResponse.data;
       console.log("[Callback] Liste des guildes:", guildList);
       
-      // Stockage temporaire en mémoire via tempDataStore
       const tempToken = crypto.randomBytes(16).toString("hex");
-      // Nous stockons l'e-mail en clair ici uniquement pour l'envoi (puisqu'il ne sera pas gardé en BD)
       const tmpData = { email: userData.email, guilds: guildList, timestamp: Date.now() };
       tempDataStore.set(tempToken, tmpData);
       
@@ -575,9 +575,9 @@ app.get("/result", (req, res) => {
 });
 
 // ================== Commandes Discord ==================
-//
-// Commande slash /settings pour consulter et modifier les paramètres
-// (salon de notification, rôle vérifié et rôle alt). Seuls les admins peuvent l'utiliser.
+
+// Gestion des commandes slash et textuelles
+
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
   
@@ -632,7 +632,6 @@ Rôle alt: ${settings.ALT_ROLE_ID}`)
   }
 });
 
-// Commandes textuelles classiques
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
@@ -674,7 +673,7 @@ client.on("messageCreate", async (message) => {
     }
     return;
   }
-  
+
   if (message.content.startsWith("!verify")) {
     console.log(`[!verify] Commande déclenchée par ${message.author.tag}`);
     if (!message.guild) return message.reply("Cette commande doit être utilisée sur un serveur.");
@@ -689,7 +688,7 @@ client.on("messageCreate", async (message) => {
 • Vérification basique : collecte uniquement votre IP.
 • Vérification haute : collecte votre IP, votre adresse e‑mail et la liste des guildes auxquelles vous appartenez.
       
-(Remarque : en vérification haute, un e‑mail de confirmation sera envoyé, mais votre adresse ne sera pas stockée.)`)
+(Remarque : en vérification haute, un e‑mail de confirmation vous sera envoyé, mais votre adresse ne sera pas conservée.)`)
       .setColor(0xffaa00)
       .setTimestamp();
     const rowButtons = new ActionRowBuilder().addComponents(
@@ -716,9 +715,9 @@ client.on("messageCreate", async (message) => {
       .setTitle("Panneau de vérification")
       .setDescription(`Choisissez le type de vérification :
 • Vérification basique : collecte uniquement votre IP.
-• Vérification haute : collecte votre IP, votre adresse e‑mail et la liste des guildes.
+• Vérification haute : collecte votre IP, votre adresse e‑mail(ne la stoque pas) et la liste des guildes.
       
-(Remarque : en vérification haute, un e‑mail de confirmation sera envoyé.)`)
+(Remarque : en vérification haute, un e‑mail de confirmation vous sera envoyé.)`)
       .setColor(0xffaa00)
       .setTimestamp();
     const rowButtons = new ActionRowBuilder().addComponents(
@@ -735,7 +734,6 @@ client.on("messageCreate", async (message) => {
   }
 });
 
-// Gestion de l'interaction pour le bouton de vérification basique
 client.on("interactionCreate", async (interaction) => {
   if (!interaction.isButton()) return;
   if (interaction.customId === "verify_basic") {
