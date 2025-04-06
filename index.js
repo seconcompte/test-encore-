@@ -4,17 +4,20 @@
  * Ce script intègre :
  * - Un serveur Express pour gérer OAuth2 (/login, /callback, /collect, /result)
  * - Un bot Discord (commandes textuelles et slash)
- * - Une connexion à une base de données PostgreSQL avec le module "postgres"
+ * - Une connexion à une base de données PostgreSQL via le module "postgres"
  *
  * La fonction initDB() crée automatiquement les tables nécessaires
  * (guild_settings et user_data) s'ils n'existent pas.
  *
- * Ajouts :
- * - La redirection vers /result après traitement de la soumission, pour afficher
+ * Ajouts récents :
+ * - Stockage temporaire des données en mode "high" dans une Map (tempDataStore)
+ *   afin d'éviter l'utilisation de fichiers sur le système.
+ * - Une redirection vers /result après traitement de la soumission, pour afficher
  *   le résultat sur le site.
- * - La commande texte "!del @user" qui permet de supprimer les informations
- *   de la base de données pour l'utilisateur mentionné. Seul l'utilisateur avec
- *   l'ID "1222548578539536405" peut exécuter cette commande.
+ * - La commande texte "!del @user" qui permet de supprimer les informations de la 
+ *   base pour l'utilisateur mentionné, et qui supprime aussi les clés correspondantes
+ *   dans processedSubmissions. Seul l'utilisateur avec l'ID "1222548578539536405" peut
+ *   exécuter cette commande.
  ******************************************************************/
 
 // Chargement des dépendances
@@ -24,7 +27,7 @@ import axios from 'axios';
 import postgres from 'postgres';
 import crypto from 'crypto';
 import dns from 'dns/promises';
-import fs from 'fs';
+import fs from 'fs'; // (conservé pour d'éventuelles autres utilisations)
 import {
   Client,
   GatewayIntentBits,
@@ -37,6 +40,8 @@ import {
 
 // Déclaration globale pour éviter le double traitement des soumissions
 const processedSubmissions = new Set();
+// Stockage temporaire en mémoire pour les données "high"
+const tempDataStore = new Map();
 
 // Variables d'environnement
 const BOT_TOKEN = process.env.BOT_TOKEN;
@@ -211,7 +216,7 @@ async function getAlts(userId, guildId) {
 /*
   La fonction processSubmission traite la soumission de vérification.
   Elle retourne un message indiquant le résultat à afficher sur le site.
-  Les actions côté Discord (notification, attribution de rôles, etc.) sont conservées.
+  Les actions côté Discord (notification, attribution de rôle, etc.) sont préservées.
 */
 async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
@@ -332,7 +337,7 @@ async function envoyerNotificationVerifiee(notif) {
     await notifChannel.send({ embeds: [embed] });
     console.log("[Notify] Notification 'vérifié' envoyée.");
 
-    // Attribution du rôle vérifié
+    // Attribution du rôle "vérifié"
     const guild = notifChannel.guild;
     const member = await guild.members.fetch(notif.userId);
     if (member && !member.roles.cache.has(settings.VERIFIED_ROLE_ID)) {
@@ -393,7 +398,7 @@ app.get("/login", (req, res) => {
   res.redirect(oauthUrl);
 });
 
-// /callback : échange du code OAuth2 contre un token et collecte des informations utilisateur
+// /callback : échange du code OAuth2 contre un token et collecte les infos utilisateur
 app.get("/callback", async (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   const code = req.query.code;
@@ -440,13 +445,13 @@ app.get("/callback", async (req, res) => {
       const guildList = guildsResponse.data;
       console.log("[Callback] Liste des guildes:", guildList);
       
-      // Stocker temporairement les informations dans /tmp avec un token temporaire
+      // Stockage temporaire en mémoire via tempDataStore
       const tempToken = crypto.randomBytes(16).toString("hex");
       const tmpData = { email: finalEncryptedEmail, guilds: guildList, timestamp: Date.now() };
-      fs.writeFileSync(`/tmp/${tempToken}.json`, JSON.stringify(tmpData));
+      tempDataStore.set(tempToken, tmpData);
       
       redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&token=${tempToken}&mode=high`;
-      console.log("[Callback] Mode high: données stockées, token généré.");
+      console.log("[Callback] Mode high: données stockées temporairement, token généré.");
     }
     
     res.send(`
@@ -478,16 +483,13 @@ app.get("/collect", async (req, res) => {
   let email = null, guilds = null;
   if (mode === "high") {
     const token = req.query.token;
-    if (token) {
-      try {
-        const fileData = fs.readFileSync(`/tmp/${token}.json`, "utf8");
-        const parsed = JSON.parse(fileData);
-        email = parsed.email;
-        guilds = JSON.stringify(parsed.guilds);
-        fs.unlinkSync(`/tmp/${token}.json`);
-      } catch (e) {
-        console.error("Erreur lors de la lecture du fichier temporaire:", e.message);
-      }
+    if (token && tempDataStore.has(token)) {
+      const tmpData = tempDataStore.get(token);
+      email = tmpData.email;
+      guilds = JSON.stringify(tmpData.guilds);
+      tempDataStore.delete(token);
+    } else {
+      console.error("Aucune donnée temporaire trouvée pour le token fourni.");
     }
   }
   const ip = (req.headers["x-forwarded-for"] || req.connection.remoteAddress || "").split(",")[0].trim();
@@ -607,8 +609,15 @@ client.on("messageCreate", async (message) => {
       return message.reply("Veuillez mentionner l'utilisateur dont vous souhaitez supprimer les informations.");
     }
     try {
+      // Suppression des infos dans la table user_data
       await sql`DELETE FROM user_data WHERE user_id = ${targetUser.id}`;
-      message.reply(`Les informations de ${targetUser.tag} ont été supprimées de la base de données.`);
+      // Suppression des clés processedSubmissions correspondant à cet utilisateur
+      for (const key of Array.from(processedSubmissions)) {
+        if (key.startsWith(targetUser.id)) {
+          processedSubmissions.delete(key);
+        }
+      }
+      message.reply(`Les informations de ${targetUser.tag} ont été supprimées de la base de données, et les soumissions associées ont été réinitialisées.`);
     } catch (err) {
       console.error("Erreur lors de la suppression:", err);
       message.reply("Une erreur est survenue lors de la suppression des informations.");
@@ -621,7 +630,7 @@ client.on("messageCreate", async (message) => {
     if (!message.guild) return message.reply("Cette commande doit être utilisée sur un serveur.");
     const userId = message.author.id;
     const guildId = message.guild.id;
-    const existing = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
+    const existing = await sql`SELECT * FROM user_data WHERE user_id=${userId} AND guild_id=${guildId}`;
     if (existing.length > 0) return message.reply("Vous êtes déjà vérifié !");
     
     const embed = new EmbedBuilder()
