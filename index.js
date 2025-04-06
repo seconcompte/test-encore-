@@ -80,7 +80,7 @@ const HASH_SALT = process.env.HASH_SALT;
 
 // ================== Liste statique des liens OAuth2 par guild ==================
 const guildOAuthLinks = {
-  "1287382398287216650": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback1")}&scope=identify+email+guilds`,
+  "1287382398287216650": `https://discord.com/oauth2/authorize?client_id=1317553245610311792&response_type=code&redirect_uri=https%3A%2F%2Fwelcome-eleen-know-e88aa2cb.koyeb.app%2Fcallback1&scope=identify+email+guilds`,
   "1273271104621903892": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback2")}&scope=identify+email+guilds`,
   "1239302430986866769": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback3")}&scope=identify+email+guilds`,
   "3333333333333333333": `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&response_type=code&redirect_uri=${encodeURIComponent(SERVER_URL + "/callback4")}&scope=identify+email+guilds`,
