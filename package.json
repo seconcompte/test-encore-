@@ -1,19 +1,29 @@
 {
-  "name": "verifybot",
+  "name": "bot",
   "version": "1.0.0",
-  "description": "Bot Discord de vérification avec serveur Express et base de données MySQL",
-  "main": "index.js",
+  "main": "bot.js",
   "scripts": {
-    "start": "node index.js"
+    "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "Votre Nom",
-  "license": "MIT",
+  "keywords": [],
+  "author": "RIchard",
+  "license": "ISC",
   "dependencies": {
     "axios": "^1.8.4",
-    "discord.js": "^14.6.0",
-    "dotenv": "^16.0.0",
-    "express": "^4.18.2",
-    "pg": "^8.14.1",
+    "discord": "^0.8.2",
+    "discord.js": "^14.18.0",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "nodemailer": "^6.10.0",
     "postgres": "^3.4.5"
-  }
+  },
+  "description": "bot dev par moi",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/seconcompte/test-encore-.git#main"
+  },
+  "bugs": {
+    "url": "https://github.com/seconcompte/test-encore-/issues"
+  },
+  "homepage": "https://github.com/seconcompte/test-encore-/tree/main#readme"
 }
