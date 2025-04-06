@@ -461,12 +461,12 @@ app.get("/callback1", async (req, res) => {
 });
 
 app.get("/callback2", async (req, res) => {
-  const guildId = "1111111111111111111";
+  const guildId = "1273271104621903892";
   await handleCallback(req, res, guildId);
 });
 
 app.get("/callback3", async (req, res) => {
-  const guildId = "2222222222222222222";
+  const guildId = "1239302430986866769";
   await handleCallback(req, res, guildId);
 });
 
