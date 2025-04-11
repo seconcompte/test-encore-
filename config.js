@@ -26,6 +26,7 @@ export const DATABASE_CONFIG = {
 };
 
 export const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD; // Pour Nodemailer
+export const API_KEY_VPN = "9a038c170f4d4066a865bd351eddc920";
 
 // Mapping entre l’ID de guilde et le suffixe de route
 export const ROUTE_SUFFIX_MAP = {
