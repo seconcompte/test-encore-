@@ -25,6 +25,30 @@ export const DATABASE_CONFIG = {
   ssl: 'require'
 };
 
-export const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD; // pour Nodemailer
+export const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD; // Pour Nodemailer
 
-export const API_KEY_VPN = "9a038c170f4d4066a865bd351eddc920"; // clé de l'API VPN
+// Mapping entre l’ID de guilde et le suffixe de route
+export const ROUTE_SUFFIX_MAP = {
+  "1287382398287216650": "-test",
+  "1273271104621903892": "-test2",
+  "1239302430986866769": "-WAFR",
+  "1097110036192448656": "-BLZ"
+};
+
+/**
+ * Renvoie le suffixe associé à l’ID de guilde, ou une chaîne vide si non défini.
+ */
+export function getRouteSuffix(guildId) {
+  return ROUTE_SUFFIX_MAP[guildId] || "";
+}
+
+/**
+ * Construit l’URL complète pour une route donnée en ajoutant le suffixe associé
+ * @param {string} guildId L’ID de la guilde d’où provient la commande.
+ * @param {string} routeName Le nom de la route (ex: "collect", "login", etc.)
+ * @returns {string} L’URL complète, par exemple "https://votreapp/collect-test"
+ */
+export function getDynamicRoute(guildId, routeName) {
+  const suffix = getRouteSuffix(guildId);
+  return `${SERVER_URL}/${routeName}${suffix}`;
+}
