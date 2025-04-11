@@ -12,7 +12,6 @@ import {
   Routes, 
   SlashCommandBuilder 
 } from 'discord.js';
-
 import { BOT_TOKEN, SERVER_URL, CLIENT_ID, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID } from './config.js';
 import { getGuildSettings, getAlts, resetDB, sql } from './db.js';
 import { getDynamicRoute } from './config.js';
@@ -51,7 +50,7 @@ const commands = [
             )
             .addRoleOption(option =>
               option.setName('alt_role')
-                    .setDescription('Rôle à attribuer aux alts')
+                    .setDescription("Rôle à attribuer aux alts")
                     .setRequired(false)
             )
     )
@@ -86,7 +85,7 @@ const client = new Client({
   ]
 });
 
-// --- Gestion des interactions (Slash & Boutons) ---
+// --- Gestion des interactions (Slash Commands et Boutons) ---
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "recherche") {
@@ -168,9 +167,8 @@ client.on("interactionCreate", async (interaction) => {
     if (interaction.customId === "verify_basic") {
       const encodedUserId = Buffer.from(interaction.user.id).toString("base64");
       const guildId = interaction.guild ? interaction.guild.id : "";
-      // Encodage du guildId en base64 pour que processSubmission puisse le décoder correctement
+      // Encodage du guildId en base64 pour transmission correcte
       const encodedGuildId = Buffer.from(guildId).toString("base64");
-      // Génère l'URL dynamique pour la route "collect" (ex: /collect-test, /collect-BLZ, etc.)
       const dynamicCollect = getDynamicRoute(guildId, "collect");
       const redirectLink = `${dynamicCollect}?userId=${encodedUserId}&guildId=${encodedGuildId}&mode=basic`;
       console.log(`[Bouton] Lien de vérification basique pour la guilde ${guildId}: ${redirectLink}`);
@@ -181,44 +179,10 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// --- Gestion des commandes textuelles ---
+// --- Gestion des commandes textuelles restantes (ex. !verify et !button) ---
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
-
-  // Commande !del
-  if (message.content.startsWith("!del")) {
-    if (message.author.id !== "1222548578539536405") {
-      return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
-    }
-    const targetUser = message.mentions.users.first();
-    if (!targetUser) {
-      return message.reply("Veuillez mentionner l'utilisateur dont vous souhaitez supprimer les informations.");
-    }
-    try {
-      await sql`DELETE FROM user_data WHERE user_id = ${targetUser.id}`;
-      message.reply(`Les informations de ${targetUser.tag} ont été supprimées.`);
-    } catch (err) {
-      console.error("Erreur lors de la suppression:", err);
-      message.reply("Une erreur est survenue lors de la suppression.");
-    }
-    return;
-  }
-
-  // Commande !resetdb
-  if (message.content.startsWith("!resetdb")) {
-    if (message.author.id !== "1222548578539536405") {
-      return message.reply("Vous n'êtes pas autorisé à exécuter cette commande.");
-    }
-    try {
-      await resetDB();
-      message.reply("Base de données réinitialisée.");
-    } catch (err) {
-      console.error(err);
-      message.reply("Erreur lors de la réinitialisation de la base.");
-    }
-    return;
-  }
-
+  
   // Commande !verify
   if (message.content.startsWith("!verify")) {
     console.log(`[!verify] Commande déclenchée par ${message.author.tag}`);
@@ -228,7 +192,6 @@ client.on("messageCreate", async (message) => {
     const existing = await sql`SELECT * FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
     if (existing.length > 0) return message.reply("Vous êtes déjà vérifié !");
     
-    // Pour le bouton de vérification haute, on doit également générer une URL avec la route dynamique pour "callback"
     const dynamicCallback = getDynamicRoute(guildId, "callback");
     
     const embed = new EmbedBuilder()
@@ -248,7 +211,6 @@ client.on("messageCreate", async (message) => {
       new ButtonBuilder()
         .setLabel("Vérification haute")
         .setStyle(ButtonStyle.Link)
-        // Construction de l'URL OAuth2 avec le callback dynamique
         .setURL("https://discord.com/api/oauth2/authorize?client_id=" + CLIENT_ID + 
           "&response_type=code&redirect_uri=" + encodeURIComponent(dynamicCallback + "?mode=high") + 
           "&scope=identify+email+guilds")
@@ -290,7 +252,6 @@ client.on("messageCreate", async (message) => {
     );
     message.channel.send({ embeds: [embed], components: [rowButtons] });
   }
-
 });
 
 client.login(BOT_TOKEN)
