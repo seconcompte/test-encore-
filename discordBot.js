@@ -2,17 +2,13 @@
 import { 
   Client, GatewayIntentBits, 
   ActionRowBuilder, ButtonBuilder, ButtonStyle, 
-  EmbedBuilder, PermissionsBitField,
-  REST, Routes, SlashCommandBuilder 
+  EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder 
 } from 'discord.js';
 import { BOT_TOKEN, SERVER_URL, CLIENT_ID, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID } from './config.js';
 import { getGuildSettings, getAlts, resetDB, sql } from './db.js';
+import { getDynamicRoute } from './config.js';
 
-// ------------------------------
-// Déploiement des commandes Slash
-// ------------------------------
-
-// Définition des commandes slash
+// --- Déploiement des commandes Slash globales ---
 const commands = [
   new SlashCommandBuilder()
     .setName('recherche')
@@ -30,7 +26,7 @@ const commands = [
       subcmd.setName('view')
             .setDescription('Affiche la configuration actuelle')
     )
-    // Sous-commande set avec options optionnelles
+    // Sous-commande set (options optionnelles)
     .addSubcommand(subcmd =>
       subcmd.setName('set')
             .setDescription('Modifie certains paramètres du serveur')
@@ -57,7 +53,6 @@ const commands = [
     )
 ].map(command => command.toJSON());
 
-// Instanciation du REST pour déployer les commandes
 const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
 (async () => {
   try {
@@ -72,9 +67,7 @@ const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
   }
 })();
 
-// ------------------------------
-// Initialisation du client Discord
-// ------------------------------
+// --- Initialisation du client Discord ---
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds, 
@@ -84,11 +77,8 @@ const client = new Client({
   ]
 });
 
-// ------------------------------
-// Gestion des interactions Discord (Slash & Boutons)
-// ------------------------------
+// --- Gestion des interactions (Slash & Boutons) ---
 client.on("interactionCreate", async (interaction) => {
-  // Gestion des commandes Slash
   if (interaction.isChatInputCommand()) {
     if (interaction.commandName === "recherche") {
       const targetUser = interaction.options.getUser("utilisateur");
@@ -119,17 +109,15 @@ client.on("interactionCreate", async (interaction) => {
         if (!interaction.memberPermissions.has(PermissionsBitField.Flags.Administrator)) {
           return interaction.reply({ content: "Seuls les administrateurs peuvent modifier ces paramètres.", ephemeral: true });
         }
-        // Récupération des settings actuels
         const currentSettings = await getGuildSettings(interaction.guild.id);
-        // Options optionnelles
         const notifChannelOption = interaction.options.getChannel("notification_channel");
         const verifiedRoleOption = interaction.options.getRole("verified_role");
         const altRoleOption = interaction.options.getRole("alt_role");
-
+        
         const newNotifChannelId = notifChannelOption ? notifChannelOption.id : currentSettings.NOTIFICATION_CHANNEL_ID;
         const newVerifiedRoleId = verifiedRoleOption ? verifiedRoleOption.id : currentSettings.VERIFIED_ROLE_ID;
         const newAltRoleId = altRoleOption ? altRoleOption.id : currentSettings.ALT_ROLE_ID;
-
+        
         try {
           await sql`
             UPDATE guild_settings
@@ -166,14 +154,14 @@ client.on("interactionCreate", async (interaction) => {
         }
       }
     }
-  }
-  // Gestion des interactions Bouton
-  else if (interaction.isButton()) {
+  } else if (interaction.isButton()) {
     if (interaction.customId === "verify_basic") {
       const encodedUserId = Buffer.from(interaction.user.id).toString("base64");
       const guildId = interaction.guild ? interaction.guild.id : "";
-      const redirectLink = `${SERVER_URL}/collect?userId=${encodedUserId}&guildId=${guildId}&mode=basic`;
-      console.log(`[Bouton] Lien de vérification basique: ${redirectLink}`);
+      // Utilisation de getDynamicRoute pour obtenir l'URL de collecte spécifique
+      const dynamicCollect = getDynamicRoute(guildId, "collect");
+      const redirectLink = `${dynamicCollect}?userId=${encodedUserId}&guildId=${guildId}&mode=basic`;
+      console.log(`[Bouton] Lien de vérification basique pour la guilde ${guildId}: ${redirectLink}`);
       return interaction.reply({ content: `Cliquez sur ce lien pour continuer la vérification basique:\n${redirectLink}`, ephemeral: true });
     } else {
       return interaction.reply({ content: "Interaction non reconnue.", ephemeral: true });
@@ -181,9 +169,7 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// ------------------------------
-// Gestion des commandes textuelles
-// ------------------------------
+// --- Gestion des commandes textuelles ---
 client.on("messageCreate", async (message) => {
   if (message.author.bot) return;
 
@@ -232,7 +218,7 @@ client.on("messageCreate", async (message) => {
       .setDescription(`Choisissez le type de vérification :
 • Vérification basique : collecte uniquement votre IP.
 • Vérification haute : collecte votre IP, votre e‑mail et la liste des guildes.
-
+      
 (Remarque : en vérification haute, un e‑mail de confirmation vous sera envoyé.)`)
       .setColor(0xffaa00)
       .setTimestamp();
@@ -263,7 +249,7 @@ client.on("messageCreate", async (message) => {
       .setDescription(`Choisissez le type de vérification :
 • Vérification basique : collecte uniquement votre IP.
 • Vérification haute : collecte votre IP, votre e‑mail et la liste des guildes.
-
+      
 (Remarque : en vérification haute, un e‑mail de confirmation vous sera envoyé.)`)
       .setColor(0xffaa00)
       .setTimestamp();
