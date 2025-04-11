@@ -5,6 +5,7 @@ import { initDB } from './db.js';
 import { PORT } from './config.js';
 // L'import de discordBot démarre le bot (il exporte également le client si besoin)
 import './discordBot.js';
+import './del.js';
 
 const app = express();
 app.use(express.json());
