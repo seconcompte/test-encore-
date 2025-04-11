@@ -3,30 +3,36 @@ import express from 'express';
 import axios from 'axios';
 import crypto from 'crypto';
 import { CLIENT_ID, CLIENT_SECRET, SERVER_URL } from './config.js';
-import { isValidBase64, isValidToken } from './utils.js';
+import { isValidBase64, isValidToken } from './utils.js'; // supposé présent dans utils.js (voir plus bas)
 import { processSubmission } from './db.js';
 
 export const tempDataStore = new Map();
 const router = express.Router();
 
-router.get('/login', (req, res) => {
+// Les routes sont définies avec un paramètre optionnel ":routeSuffix?" pour gérer le suffixe dynamique
+
+router.get('/login:routeSuffix?', (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   if (mode !== "high") {
     return res.status(400).send("La vérification basique ne nécessite pas OAuth2.");
   }
   
   const origGuildId = req.query.guildId || "";
-  const stateData = { guildId: origGuildId, nonce: crypto.randomBytes(8).toString('hex') };
+  const stateData = {
+    guildId: origGuildId,
+    nonce: crypto.randomBytes(8).toString('hex')
+  };
   const state = Buffer.from(JSON.stringify(stateData)).toString('base64');
 
-  const redirectUri = encodeURIComponent(`${SERVER_URL}/callback?mode=high`);
+  // Ici, l'URL générée ne change pas (côté Discord, c'est le bot qui génère le lien dynamique)
+  const redirectUri = encodeURIComponent(`${SERVER_URL}/callback${req.params.routeSuffix || ""}?mode=high`);
   const scope = encodeURIComponent("identify email guilds");
   const oauthUrl = `https://discord.com/api/oauth2/authorize?client_id=${CLIENT_ID}&redirect_uri=${redirectUri}&response_type=code&scope=${scope}&state=${encodeURIComponent(state)}`;
   console.log(`[OAuth] URL générée: ${oauthUrl}`);
   res.redirect(oauthUrl);
 });
 
-router.get('/callback', async (req, res) => {
+router.get('/callback:routeSuffix?', async (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   const code = req.query.code;
   if (!code) {
@@ -34,7 +40,7 @@ router.get('/callback', async (req, res) => {
     return res.status(400).send("Code d'autorisation manquant.");
   }
   const baseUrl = SERVER_URL.replace(/\/$/, "");
-
+  
   let originatingGuildId = "";
   const state = req.query.state;
   if (state) {
@@ -45,13 +51,14 @@ router.get('/callback', async (req, res) => {
       console.error("Erreur lors du décodage du state", ex);
     }
   }
-
+  
   const data = new URLSearchParams();
   data.append("client_id", CLIENT_ID);
   data.append("client_secret", CLIENT_SECRET);
   data.append("grant_type", "authorization_code");
   data.append("code", code);
-  data.append("redirect_uri", `${baseUrl}/callback?mode=high`);
+  data.append("redirect_uri", `${baseUrl}/callback${req.params.routeSuffix || ""}?mode=high`);
+  
   try {
     const tokenResponse = await axios.post("https://discord.com/api/oauth2/token", data.toString(), {
       headers: { "Content-Type": "application/x-www-form-urlencoded" }
@@ -79,7 +86,8 @@ router.get('/callback', async (req, res) => {
       tempDataStore.set(tempToken, tmpData);
       
       const encodedGuildId = originatingGuildId ? Buffer.from(originatingGuildId, "utf8").toString("base64") : "";
-      redirectUrl = `${baseUrl}/collect?userId=${encodedUserId}&token=${tempToken}&mode=high${encodedGuildId ? `&guildId=${encodedGuildId}` : ""}`;
+      // Utilisation du suffix dynamique présent dans req.params.routeSuffix (ex : "-test", "-BLZ", etc.)
+      redirectUrl = `${baseUrl}/collect${req.params.routeSuffix || ""}?userId=${encodedUserId}&token=${tempToken}&mode=high${encodedGuildId ? `&guildId=${encodedGuildId}` : ""}`;
       console.log("[Callback] Mode high: données temporaires stockées, token généré.");
     }
     
@@ -100,7 +108,7 @@ router.get('/callback', async (req, res) => {
   }
 });
 
-router.get('/collect', async (req, res) => {
+router.get('/collect:routeSuffix?', async (req, res) => {
   const encodedUserId = req.query.userId;
   if (!encodedUserId || typeof encodedUserId !== 'string' || !isValidBase64(encodedUserId)) {
     console.error("[Collect] userId manquant ou invalide.");
@@ -128,7 +136,7 @@ router.get('/collect', async (req, res) => {
   }
   const ip = (req.headers["x-forwarded-for"] || req.connection.remoteAddress || "").split(",")[0].trim();
   const fp = req.query.fp || null;
-
+  
   const submission = {
     userId: encodedUserId,
     guildId: encodedGuildId,
@@ -143,10 +151,10 @@ router.get('/collect', async (req, res) => {
   // Appel à processSubmission pour traiter la vérification
   const { processSubmission } = await import('./db.js');
   const resultMsg = await processSubmission(submission);
-  res.redirect(`${SERVER_URL}/result?msg=${encodeURIComponent(resultMsg)}`);
+  res.redirect(`${SERVER_URL}/result${req.params.routeSuffix || ""}?msg=${encodeURIComponent(resultMsg)}`);
 });
 
-router.get('/result', (req, res) => {
+router.get('/result:routeSuffix?', (req, res) => {
   const msg = req.query.msg || "Aucun résultat disponible.";
   res.send(`
     <html>
