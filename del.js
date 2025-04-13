@@ -1,4 +1,3 @@
-// del.js
 const { Client, GatewayIntentBits } = require('discord.js');
 const { Pool } = require('pg');
 require('dotenv').config();
