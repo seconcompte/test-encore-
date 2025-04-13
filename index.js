@@ -1,11 +1,10 @@
-// index.js
-import express from 'express';
-import oauthRoutes from './oauthRoutes.js';
-import { initDB } from './db.js';
-import { PORT } from './config.js';
+const express = require('express');
+const oauthRoutes = require('./oauthRoutes');
+const { initDB } = require('./db');
+const { PORT } = require('./config');
 // L'import de discordBot démarre le bot (il exporte également le client si besoin)
-import './discordBot.js';
-import './del.js';
+require('./discordBot');
+require('./del');
 
 const app = express();
 app.use(express.json());
