@@ -1,9 +1,8 @@
-// utils.js
-import axios from 'axios';
-import dns from 'dns/promises';
-import { API_KEY_VPN } from './config.js';
+const axios = require('axios');
+const dns = require('dns').promises;
+const { API_KEY_VPN } = require('./config');
 
-export function isValidBase64(str) {
+function isValidBase64(str) {
   if (typeof str !== 'string') return false;
   try {
     Buffer.from(str, 'base64').toString('utf8');
@@ -13,20 +12,20 @@ export function isValidBase64(str) {
   }
 }
 
-export function isValidToken(token) {
+function isValidToken(token) {
   return /^[a-f0-9]{32}$/i.test(token);
 }
 
-export function isValidUserId(userId) {
+function isValidUserId(userId) {
   return /^\d+$/.test(userId);
 }
 
-export function isValidGuildId(guildId) {
+function isValidGuildId(guildId) {
   // Généralement un ID de guilde comporte 17 à 19 chiffres.
   return /^\d{17,19}$/.test(guildId);
 }
 
-export async function detectVPNviaAPI(ip) {
+async function detectVPNviaAPI(ip) {
   try {
     const response = await axios.get(`https://vpnapi.io/api/${ip}?key=${API_KEY_VPN}`);
     if (response.data && response.data.security && response.data.security.vpn === true) {
@@ -39,7 +38,7 @@ export async function detectVPNviaAPI(ip) {
   return false;
 }
 
-export async function detectVPNviaDNS(ip) {
+async function detectVPNviaDNS(ip) {
   try {
     const hostnames = await dns.reverse(ip);
     console.log(`[VPN DNS] Reverse DNS pour l'IP ${ip}:`, hostnames);
@@ -58,6 +57,16 @@ export async function detectVPNviaDNS(ip) {
   return false;
 }
 
-export async function detectVPN(ip) {
+async function detectVPN(ip) {
   return (await detectVPNviaAPI(ip)) || (await detectVPNviaDNS(ip));
 }
+
+module.exports = {
+  isValidBase64,
+  isValidToken,
+  isValidUserId,
+  isValidGuildId,
+  detectVPNviaAPI,
+  detectVPNviaDNS,
+  detectVPN,
+};
