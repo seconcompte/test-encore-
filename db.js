@@ -1,13 +1,12 @@
-// db.js
-import postgres from 'postgres';
-import { DATABASE_CONFIG, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID, HASH_SALT } from './config.js';
-import { isValidBase64, isValidUserId, isValidGuildId, detectVPN } from './utils.js';
-import crypto from 'crypto';
-import { sendConfirmationEmail } from './email.js';
+const postgres = require('postgres');
+const { DATABASE_CONFIG, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID, HASH_SALT } = require('./config');
+const { isValidBase64, isValidUserId, isValidGuildId, detectVPN } = require('./utils');
+const crypto = require('crypto');
+const { sendConfirmationEmail } = require('./email');
 
-export const sql = postgres(DATABASE_CONFIG);
+const sql = postgres(DATABASE_CONFIG);
 
-export async function initDB() {
+async function initDB() {
   await sql`
     CREATE TABLE IF NOT EXISTS guild_settings (
       guild_id TEXT PRIMARY KEY,
@@ -31,13 +30,13 @@ export async function initDB() {
   console.log("Database initialized.");
 }
 
-export async function resetDB() {
+async function resetDB() {
   await sql`DROP TABLE IF EXISTS user_data;`;
   await sql`DROP TABLE IF EXISTS guild_settings;`;
   await initDB();
 }
 
-export async function getGuildSettings(guildId) {
+async function getGuildSettings(guildId) {
   const rows = await sql`SELECT * FROM guild_settings WHERE guild_id = ${guildId}`;
   if (rows.length > 0) {
     const row = rows[0];
@@ -62,7 +61,7 @@ export async function getGuildSettings(guildId) {
   }
 }
 
-export async function getAlts(userId, guildId) {
+async function getAlts(userId, guildId) {
   const rows = await sql`SELECT stable_hash FROM user_data WHERE user_id = ${userId} AND guild_id = ${guildId}`;
   if (rows.length === 0) return [];
   let myHashes;
@@ -94,7 +93,7 @@ export async function getAlts(userId, guildId) {
 // Ensemble des soumissions déjà traitées (pour éviter les doublons)
 const processedSubmissions = new Set();
 
-export async function processSubmission(submission) {
+async function processSubmission(submission) {
   console.log("PROCESSING SUBMISSION:", submission);
   let userId, guildId;
   try {
@@ -192,3 +191,12 @@ export async function processSubmission(submission) {
     return "Votre vérification a été effectuée avec succès.";
   }
 }
+
+module.exports = {
+  sql,
+  initDB,
+  resetDB,
+  getGuildSettings,
+  getAlts,
+  processSubmission
+};
