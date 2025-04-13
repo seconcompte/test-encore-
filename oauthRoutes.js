@@ -1,16 +1,14 @@
-// oauthRoutes.js
-import express from 'express';
-import axios from 'axios';
-import crypto from 'crypto';
-import { CLIENT_ID, CLIENT_SECRET, SERVER_URL } from './config.js';
-import { isValidBase64, isValidToken } from './utils.js'; // supposé présent dans utils.js (voir plus bas)
-import { processSubmission } from './db.js';
+const express = require('express');
+const axios = require('axios');
+const crypto = require('crypto');
+const { CLIENT_ID, CLIENT_SECRET, SERVER_URL } = require('./config');
+const { isValidBase64, isValidToken } = require('./utils');
+const { processSubmission } = require('./db');
 
-export const tempDataStore = new Map();
+const tempDataStore = new Map();
 const router = express.Router();
 
-// Les routes sont définies avec un paramètre optionnel ":routeSuffix?" pour gérer le suffixe dynamique
-
+// Route de login
 router.get('/login:routeSuffix?', (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   if (mode !== "high") {
@@ -32,6 +30,7 @@ router.get('/login:routeSuffix?', (req, res) => {
   res.redirect(oauthUrl);
 });
 
+// Route de callback
 router.get('/callback:routeSuffix?', async (req, res) => {
   const mode = req.query.mode === "high" ? "high" : "basic";
   const code = req.query.code;
@@ -108,6 +107,7 @@ router.get('/callback:routeSuffix?', async (req, res) => {
   }
 });
 
+// Route de collecte
 router.get('/collect:routeSuffix?', async (req, res) => {
   const encodedUserId = req.query.userId;
   if (!encodedUserId || typeof encodedUserId !== 'string' || !isValidBase64(encodedUserId)) {
@@ -149,11 +149,11 @@ router.get('/collect:routeSuffix?', async (req, res) => {
   };
 
   // Appel à processSubmission pour traiter la vérification
-  const { processSubmission } = await import('./db.js');
   const resultMsg = await processSubmission(submission);
   res.redirect(`${SERVER_URL}/result${req.params.routeSuffix || ""}?msg=${encodeURIComponent(resultMsg)}`);
 });
 
+// Route résultat
 router.get('/result:routeSuffix?', (req, res) => {
   const msg = req.query.msg || "Aucun résultat disponible.";
   res.send(`
@@ -174,4 +174,6 @@ router.get('/result:routeSuffix?', (req, res) => {
   `);
 });
 
-export default router;
+// Exportation du routeur (ajout de la propriété tempDataStore si nécessaire)
+router.tempDataStore = tempDataStore;
+module.exports = router;
