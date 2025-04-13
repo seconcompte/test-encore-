@@ -15,7 +15,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "nodemailer": "^6.10.0",
-    "postgres": "^3.4.5"
+    "postgres": "^3.4.5",
+    "pg": "^8.11.0"
   },
   "description": "bot dev par moi",
   "repository": {
