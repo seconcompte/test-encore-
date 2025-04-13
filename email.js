@@ -1,6 +1,5 @@
-// email.js
-import nodemailer from 'nodemailer';
-import { EMAIL_PASSWORD } from './config.js';
+const nodemailer = require('nodemailer');
+const { EMAIL_PASSWORD } = require('./config');
 
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -10,7 +9,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-export async function sendConfirmationEmail(email) {
+async function sendConfirmationEmail(email) {
   const mailOptions = {
     from: 'autentibotofficial@gmail.com',
     to: email,
@@ -25,3 +24,5 @@ export async function sendConfirmationEmail(email) {
     console.error("Erreur lors de l'envoi de l'e‑mail de confirmation :", error);
   }
 }
+
+module.exports = { sendConfirmationEmail };
