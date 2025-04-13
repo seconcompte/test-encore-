@@ -1,20 +1,7 @@
-// discordBot.js
-
-import { 
-  Client, 
-  GatewayIntentBits, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle, 
-  EmbedBuilder, 
-  PermissionsBitField, 
-  REST, 
-  Routes, 
-  SlashCommandBuilder 
-} from 'discord.js';
-import { BOT_TOKEN, SERVER_URL, CLIENT_ID, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID } from './config.js';
-import { getGuildSettings, getAlts, resetDB, sql } from './db.js';
-import { getDynamicRoute } from './config.js';
+const { Client, GatewayIntentBits, ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder, PermissionsBitField, REST, Routes, SlashCommandBuilder } = require('discord.js');
+const { BOT_TOKEN, SERVER_URL, CLIENT_ID, DEFAULT_NOTIFICATION_CHANNEL_ID, DEFAULT_VERIFIED_ROLE_ID, DEFAULT_ALT_ROLE_ID } = require('./config');
+const { getGuildSettings, getAlts, resetDB, sql } = require('./db');
+const { getDynamicRoute } = require('./config');
 
 // --- Déploiement des commandes Slash globales ---
 const commands = [
@@ -258,4 +245,4 @@ client.login(BOT_TOKEN)
   .then(() => console.log("[Login] Discord client connecté avec succès."))
   .catch(err => console.error("[Login] Erreur lors du login:", err.message));
 
-export default client;
+module.exports = client;
